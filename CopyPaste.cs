@@ -2110,6 +2110,38 @@ namespace Oxide.Plugins
             var quaternionRotation = Quaternion.EulerRotation(eulerRotation);
             var preloaddata = new HashSet<Dictionary<string, object>>();
 
+            void PreLoadChildrenData(Dictionary<string, object> entity)
+            {
+                if (entity.ContainsKey("children"))
+                {
+                    var children = entity["children"] as List<object>;
+
+                    if (children == null)
+                        return;
+
+                    // Set the (local) position and rotation of the children
+                    foreach (var child in children)
+                    {
+                        var childData = child as Dictionary<string, object>;
+                        if (childData == null)
+                            continue;
+
+                        var childPos = (Dictionary<string, object>)childData["pos"];
+                        var childRot = (Dictionary<string, object>)childData["rot"];
+
+                        childData.Add("position",
+                            new Vector3(Convert.ToSingle(childPos["x"]), Convert.ToSingle(childPos["y"]),
+                                Convert.ToSingle(childPos["z"])));
+                        childData.Add("rotation",
+                            Quaternion.Euler(new Vector3(Convert.ToSingle(childRot["x"]),
+                                Convert.ToSingle(childRot["y"]), Convert.ToSingle(childRot["z"]))));
+
+                        // Recursively process the child's children
+                        PreLoadChildrenData(childData);
+                    }
+                }
+            }
+
             foreach (Dictionary<string, object> entity in entities)
             {
                 if (!deployables && !entity.ContainsKey("grade"))
@@ -2130,33 +2162,9 @@ namespace Oxide.Plugins
 
                 if (!vending && entity["prefabname"].ToString().Contains("vendingmachine"))
                     entity.Remove("vendingmachine");
-                
-                if (entity.ContainsKey("children"))
-                {
-                    var children = entity["children"] as List<object>;
-                    
-                    if (children == null)
-                        continue;
-                    
-                    // Set the (local) position and rotation of the children
-                    foreach (var child in children)
-                    {
-                        var childData = child as Dictionary<string, object>;
-                        if (childData == null)
-                            continue;
-                        
-                        var childPos = (Dictionary<string, object>)childData["pos"];
-                        var childRot = (Dictionary<string, object>)childData["rot"];
-                        
-                        childData.Add("position",
-                            new Vector3(Convert.ToSingle(childPos["x"]), Convert.ToSingle(childPos["y"]),
-                                Convert.ToSingle(childPos["z"])));
-                        childData.Add("rotation",
-                            Quaternion.Euler(new Vector3(Convert.ToSingle(childRot["x"]),
-                                Convert.ToSingle(childRot["y"]), Convert.ToSingle(childRot["z"]))));
-                    }
-                }
-                
+
+                PreLoadChildrenData(entity);
+
                 preloaddata.Add(entity);
             }
 
