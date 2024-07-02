@@ -964,6 +964,12 @@ namespace Oxide.Plugins
                     ioData.Add("frequency", rfBroadcaster.GetFrequency());
                 }
 
+                var seismicSensor = ioEntity as SeismicSensor;
+                if (seismicSensor != null)
+                {
+                    ioData.Add("range", seismicSensor.range);
+                }
+
                 data.Add("IOEntity", ioData);
             }
 
@@ -1948,6 +1954,12 @@ namespace Oxide.Plugins
                 RFManager.AddListener(newFrequency, rfReceiver);
                 rfReceiver.frequency = newFrequency;
                 rfReceiver.MarkDirty();
+            }
+
+            var seismicSensor = ioEntity as SeismicSensor;
+            if (seismicSensor != null && ioData.ContainsKey("range"))
+            {
+                seismicSensor.SetRange(Convert.ToInt32(ioData["range"]));
             }
 
             var doorManipulator = ioEntity as CustomDoorManipulator;
