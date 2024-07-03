@@ -1875,17 +1875,17 @@ namespace Oxide.Plugins
             if (data.ContainsKey("children"))
             {
                 var children = data["children"] as List<object>;
-                
-                if (children == null)
-                    return;
-                
-                foreach (var child in children)
+
+                if (children != null)
                 {
-                    var childData = child as Dictionary<string, object>;
-                    if (childData == null)
-                        continue;
-                    
-                    PasteEntity(childData, pasteData, entity);
+                    foreach (var child in children)
+                    {
+                        var childData = child as Dictionary<string, object>;
+                        if (childData == null)
+                            continue;
+
+                        PasteEntity(childData, pasteData, entity);
+                    }
                 }
             }
             
