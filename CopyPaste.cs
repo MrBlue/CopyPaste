@@ -823,7 +823,17 @@ namespace Oxide.Plugins
             var lights = entity as AdvancedChristmasLights;
             if (lights != null)
             {
-                data.Add("points", lights.points.Select(x => new { x.normal, x.point }));
+                var lightsPointsList = new List<Dictionary<string, object>>();
+                foreach (var lightsPoint in lights.points)
+                {
+                    lightsPointsList.Add(new Dictionary<string, object>
+                    {
+                        { "normal", lightsPoint.normal },
+                        { "point", NormalizePosition(copyData.SourcePos, lightsPoint.point, copyData.RotCor) },
+                        { "slack", lightsPoint.slack },
+                    });
+                }
+                data.Add("points", lightsPointsList);
                 data.Add("animationStyle", lights.animationStyle);
             }
 
@@ -1734,10 +1744,27 @@ namespace Oxide.Plugins
                     var points = data["points"] as List<object>;
                     if (points != null && points.Count > 0)
                     {
-                        foreach (Dictionary<string, object> point in points)
+                        foreach (Dictionary<string, object> pointEntry in points)
                         {
+                            var normal = (Dictionary<string, object>)pointEntry["normal"];
+                            var point = (Dictionary<string, object>)pointEntry["point"];
+
+                            var adjustedPoint = pasteData.QuaternionRotation * new Vector3(Convert.ToSingle(point["x"]),
+                                Convert.ToSingle(point["y"]),
+                                Convert.ToSingle(point["z"])) + pasteData.StartPos;
+
+                            adjustedPoint.y += pasteData.HeightAdj;
+
+                            float slack = 0f;
+                            if (pointEntry.TryGetValue("slack", out var rawSlack))
+                                slack = Convert.ToSingle(rawSlack);
+
                             lights.points.Add(new AdvancedChristmasLights.pointEntry
-                                { normal = (Vector3)point["normal"], point = (Vector3)point["point"] });
+                            {
+                                normal = new Vector3(Convert.ToSingle(normal["x"]), Convert.ToSingle(normal["y"]), Convert.ToSingle(normal["z"])),
+                                point = adjustedPoint,
+                                slack = slack
+                            });
                         }
                     }
                 }
