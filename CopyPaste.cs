@@ -2206,6 +2206,9 @@ namespace Oxide.Plugins
                     }
                 }
 
+                if (!string.IsNullOrEmpty(item.name))
+                    itemdata["name"] = item.name;
+
                 if (!string.IsNullOrEmpty(item.text))
                     itemdata["text"] = item.text;
 
