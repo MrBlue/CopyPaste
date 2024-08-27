@@ -2123,6 +2123,12 @@ namespace Oxide.Plugins
                                     ioOutput.slackLevels[i] = Convert.ToSingle(slackLevels[i]);
                                 }
                             }
+                            else
+                            {
+                                ioOutput.slackLevels = new float[ioOutput.linePoints.Count()];
+                                for (var i = 0; i < ioOutput.slackLevels.Count(); i++)
+                                    ioOutput.slackLevels[i] = 0f;
+                            }
 
                             if (output.ContainsKey("lineAnchors") && output["lineAnchors"] is List<object> lineAnchors)
                             {
