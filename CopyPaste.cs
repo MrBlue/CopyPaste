@@ -337,7 +337,7 @@ namespace Oxide.Plugins
         {
             const float maxDiff = 0.01f;
 
-            var ents = Pool.GetList<BaseEntity>();
+            var ents = Pool.Get<List<BaseEntity>>();
             try
             {
                 Vis.Entities(pos, maxDiff, ents);
@@ -364,7 +364,7 @@ namespace Oxide.Plugins
             }
             finally
             {
-                Pool.FreeList(ref ents);
+                Pool.FreeUnmanaged(ref ents);
             }
         }
 
@@ -463,7 +463,7 @@ namespace Oxide.Plugins
                 if (checkFrom.Count == 0)
                     break;
 
-                var list = Pool.GetList<BaseEntity>();
+                var list = Pool.Get<List<BaseEntity>>();
                 try
                 {
                     Vis.Entities(checkFrom.Pop(), copyData.Range, list, copyData.CurrentLayer);
@@ -508,7 +508,7 @@ namespace Oxide.Plugins
                 }
                 finally
                 {
-                    Pool.FreeList(ref list);
+                    Pool.FreeUnmanaged(ref list);
                 }
 
                 copyData.BuildingId = buildingId;
@@ -2519,7 +2519,7 @@ namespace Oxide.Plugins
             {
                 var headDataData = (Dictionary<string, object>)data["currentTrophyData"];
 
-                var clothing = Pool.GetList<int>();
+                var clothing = Pool.Get<List<int>>();
                 if (headDataData["clothing"] is List<object> clothingData)
                 {
                     foreach (var clothingItem in clothingData)
@@ -2528,7 +2528,7 @@ namespace Oxide.Plugins
                     }
                 }
                 if (clothing.Count == 0)
-                    Pool.FreeList(ref clothing);
+                    Pool.FreeUnmanaged(ref clothing);
 
                 headData.entitySource = Convert.ToUInt32(headDataData["entitySource"]);
                 headData.playerName = headDataData["playerName"] as string;
