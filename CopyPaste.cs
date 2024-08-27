@@ -964,6 +964,23 @@ namespace Oxide.Plugins
                     ioData.Add("industrialconveyorfilteritems", SerializeConveyorFilter(conveyor.filterItems));
                 }
 
+                var digitalClock = ioEntity as DigitalClock;
+                if (digitalClock != null)
+                {
+                    var alarms = new List<object>();
+                    foreach (var alarm in digitalClock.alarms)
+                    {
+                        alarms.Add(new Dictionary<string, object>
+                        {
+                            { "time", alarm.time },
+                            { "active", alarm.active },
+                        });
+                    }
+
+                    ioData.Add("muted", digitalClock.muted);
+                    ioData.Add("alarms", alarms);
+                }
+
                 data.Add("IOEntity", ioData);
             }
 
@@ -2028,6 +2045,30 @@ namespace Oxide.Plugins
 
                 conveyor.filterItems = DeSerializeConveyorFilter(ioData["industrialconveyorfilteritems"].ToString());
                 conveyor.SendNetworkUpdate();
+            }
+
+            var digitalClock = ioEntity as DigitalClock;
+            if (digitalClock != null)
+            {
+                if (ioData.ContainsKey("muted"))
+                {
+                    digitalClock.muted = Convert.ToBoolean(ioData["muted"]);
+                }
+
+                if (ioData.ContainsKey("alarms") && ioData["alarms"] is List<object> alarms)
+                {
+                    foreach (Dictionary<string, object> alarm in alarms)
+                    {
+                        if (alarm != null && alarm.ContainsKey("time") && alarm.ContainsKey("active"))
+                        {
+                            digitalClock.alarms.Add(new DigitalClock.Alarm(TimeSpan.Parse(alarm["time"].ToString()),
+                                Convert.ToBoolean(alarm["active"])));
+                        }
+                    }
+                }
+
+                digitalClock.MarkDirty();
+                digitalClock.SendNetworkUpdate();
             }
 
             if (inputs != null && inputs.Count > 0)
