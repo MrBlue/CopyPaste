@@ -774,6 +774,15 @@ namespace Oxide.Plugins
                 });
             }
 
+            var tinCanAlarm = entity as TinCanAlarm;
+            if (tinCanAlarm != null)
+            {
+                if (tinCanAlarm.endPoint != Vector3.zero)
+                {
+                    data.Add("endPoint", NormalizePosition(copyData.SourcePos, tinCanAlarm.endPoint, copyData.RotCor));
+                }
+            }
+
             var cctvRc = entity as CCTV_RC;
             if (cctvRc != null)
             {
@@ -1700,6 +1709,23 @@ namespace Oxide.Plugins
                 }
 
                 cupboard.SendNetworkUpdate();
+            }
+
+            var tinCanAlarm = entity as TinCanAlarm;
+            if (tinCanAlarm != null)
+            {
+                if (data.ContainsKey("endPoint"))
+                {
+                    var endPoint = (Dictionary<string, object>)data["endPoint"];
+                    var adjustedEndPoint = pasteData.QuaternionRotation * new Vector3(Convert.ToSingle(endPoint["x"]),
+                        Convert.ToSingle(endPoint["y"]),
+                        Convert.ToSingle(endPoint["z"])) + pasteData.StartPos;
+
+                    adjustedEndPoint.y += pasteData.HeightAdj;
+
+                    tinCanAlarm.endPoint = adjustedEndPoint;
+                    tinCanAlarm.SendNetworkUpdate();
+                }
             }
 
             var cctvRc = entity as CCTV_RC;
