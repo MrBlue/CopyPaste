@@ -8,6 +8,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using System.Text;
 using Facepunch;
 using Newtonsoft.Json;
 using Oxide.Core;
@@ -26,6 +27,7 @@ using Graphics = System.Drawing.Graphics;
  * UIP88 - Turrets fix
  * bsdinis - Wire fix
  * nivex - Ownership option, sign fix
+ * bmgjet - pattern firework, industrial
  * DezLife - CCTV fix
  * Wulf - Skipping 4.1.24 :D
  * 
@@ -762,6 +764,16 @@ namespace Oxide.Plugins
                 }
             }
 
+            var firework = entity as PatternFirework;
+            if (firework != null && firework?.Design != null && firework?.Design?.stars != null)
+            {
+                data.Add("patternfirework", new Dictionary<string, object>
+                {
+                    { "editedBy", firework.Design.editedBy },
+                    { "stars", SerializeStarPattern(firework.Design.stars) },
+                });
+            }
+
             var cctvRc = entity as CCTV_RC;
             if (cctvRc != null)
             {
@@ -940,26 +952,11 @@ namespace Oxide.Plugins
                     ioData.Add("range", seismicSensor.range);
                 }
 
-                var industrialConveyor = ioEntity as IndustrialConveyor;
-                if (industrialConveyor != null)
+                var conveyor = ioEntity as IndustrialConveyor;
+                if (conveyor != null)
                 {
-                    var filterItemsList = new List<Dictionary<string, object>>();
-                    foreach (var industrialConveyorFilterItem in industrialConveyor.filterItems)
-                    {
-                        filterItemsList.Add(new Dictionary<string, object>
-                        {
-                            { "TargetItemName", industrialConveyorFilterItem.TargetItemName },
-                            { "TargetCategory", industrialConveyorFilterItem.TargetCategory },
-                            { "MaxAmountInOutput", industrialConveyorFilterItem.MaxAmountInOutput },
-                            { "BufferAmount", industrialConveyorFilterItem.BufferAmount },
-                            { "MinAmountInInput", industrialConveyorFilterItem.MinAmountInInput },
-                            { "IsBlueprint", industrialConveyorFilterItem.IsBlueprint },
-                            { "BufferTransferRemaining", industrialConveyorFilterItem.BufferTransferRemaining },
-                        });
-                    }
-
-                    ioData.Add("filterItems", filterItemsList);
-                    ioData.Add("mode", industrialConveyor.mode);
+                    ioData.Add("industrialconveyormode", (int)conveyor.mode);
+                    ioData.Add("industrialconveyorfilteritems", SerializeConveyorFilter(conveyor.filterItems));
                 }
 
                 data.Add("IOEntity", ioData);
@@ -1194,6 +1191,25 @@ namespace Oxide.Plugins
                     entity.UpdateStability();
                 }
 
+                foreach (var adapter in pasteData.industrialStorageAdaptors)
+                {
+                    if (adapter == null) { return; }
+                    if (!adapter.HasParent())
+                    {
+                        List<BaseEntity> ents = Facepunch.Pool.GetList<BaseEntity>();
+                        Vis.Entities(adapter.transform.position + (adapter.transform.up * -0.2f), 0.01f, ents);
+                        if (ents.Count > 0)
+                        {
+                            adapter.SetParent(ents[0], true, true);
+                        }
+                        Facepunch.Pool.FreeList(ref ents);
+                    }
+                    adapter.MarkDirtyForceUpdateOutputs();
+                    adapter.SendNetworkUpdateImmediate(false);
+                    adapter.RefreshIndustrialPreventBuilding();
+                    adapter.NotifyIndustrialNetworkChanged();
+                }
+
                 pasteData.FinalProcessingActions.ForEach(action => action());
 
                 pasteData.Player.Reply(Lang("PASTE_SUCCESS", pasteData.Player.Id));
@@ -1374,6 +1390,23 @@ namespace Oxide.Plugins
             }
             else if (baseCombat != null)
                 baseCombat.SetHealth(baseCombat.MaxHealth());
+
+            var firework = entity as PatternFirework;
+            if (firework != null && data.ContainsKey("patternfirework"))
+            {
+                if (firework?.Design == null)
+                {
+                    firework.Design = new ProtoBuf.PatternFirework.Design();
+                    firework.Design.stars = new List<ProtoBuf.PatternFirework.Star>();
+                }
+                var pattern = (Dictionary<string, object>)data["patternfirework"];
+                object editedBy;
+                if (data.TryGetValue("editedBy", out editedBy))
+                    firework.Design.editedBy = Convert.ToUInt32(pattern["editedBy"]);
+
+                firework.Design.stars = DeSerializeStarPattern(pattern["stars"].ToString());
+                firework.SendNetworkUpdate();
+            }
 
             // This needs to stay for the old configs to load properly but is unused because of the new 'children' system.
             pasteData.PastedEntities.AddRange(TryPasteSlots(entity, data, pasteData));
@@ -1891,6 +1924,11 @@ namespace Oxide.Plugins
                 }
             }
 
+            if (entity is IndustrialStorageAdaptor)
+            {
+                pasteData.industrialStorageAdaptors.Add(entity as IndustrialStorageAdaptor);
+            }
+
             pasteData.PastedEntities.Add(entity);
             pasteData.CallbackSpawned?.Invoke(entity);
         }
@@ -1968,41 +2006,15 @@ namespace Oxide.Plugins
                 }
             }
 
-            var industrialConveyor = ioEntity as IndustrialConveyor;
-            if (industrialConveyor != null)
+            var conveyor = ioEntity as IndustrialConveyor;
+            if (conveyor != null && ioData.ContainsKey("industrialconveyormode"))
             {
-                if (ioData.TryGetValue("mode", out var mode))
-                {
-                    industrialConveyor.mode = (IndustrialConveyor.ConveyorMode)Convert.ToInt32(mode);
-                }
+                object mode;
+                if (ioData.TryGetValue("industrialconveyormode", out mode))
+                    conveyor.mode = (IndustrialConveyor.ConveyorMode)Convert.ToInt32(mode);
 
-                if (ioData.TryGetValue("filterItems", out var filterItems) && filterItems is List<object> filterItemsList)
-                {
-                    foreach (var itemFilterObj in filterItemsList)
-                    {
-                        var itemFilterDef = (Dictionary<string, object>)itemFilterObj;
-                        if (itemFilterDef != null)
-                        {
-                            var itemFilter = new IndustrialConveyor.ItemFilter();
-
-                            itemFilter.TargetItemName = itemFilterDef["TargetItemName"] as string;
-
-                            if (itemFilterDef["TargetCategory"] != null)
-                                itemFilter.TargetCategory = (ItemCategory)Convert.ToInt32(itemFilterDef["TargetCategory"]);
-
-                            itemFilter.MaxAmountInOutput = Convert.ToInt32(itemFilterDef["MaxAmountInOutput"]);
-                            itemFilter.BufferAmount = Convert.ToInt32(itemFilterDef["BufferAmount"]);
-                            itemFilter.MinAmountInInput = Convert.ToInt32(itemFilterDef["MinAmountInInput"]);
-                            itemFilter.IsBlueprint = Convert.ToBoolean(itemFilterDef["IsBlueprint"]);
-                            itemFilter.BufferTransferRemaining = Convert.ToInt32(itemFilterDef["BufferTransferRemaining"]);
-
-                            if (itemFilter.TargetItem != null || itemFilter.TargetCategory.HasValue)
-                                industrialConveyor.filterItems.Add(itemFilter);
-                        }
-                    }
-                }
-
-                industrialConveyor.PostServerLoad();
+                conveyor.filterItems = DeSerializeConveyorFilter(ioData["industrialconveyorfilteritems"].ToString());
+                conveyor.SendNetworkUpdate();
             }
 
             if (inputs != null && inputs.Count > 0)
@@ -3036,6 +3048,76 @@ namespace Oxide.Plugins
             return entitySlots;
         }
 
+        private List<IndustrialConveyor.ItemFilter> DeSerializeConveyorFilter(string itemstring)
+        {
+            List<IndustrialConveyor.ItemFilter> itemFilters = new List<IndustrialConveyor.ItemFilter>();
+            try
+            {
+                foreach (string datapoint in Encoding.ASCII.GetString(Facepunch.Utility.Compression.Uncompress(Convert.FromBase64String(itemstring))).Split('\\'))
+                {
+                    if (datapoint != null && !string.IsNullOrEmpty(datapoint))
+                    {
+                        string[] info = datapoint.Split('/');
+                        if (info.Length == 4)
+                        {
+                            IndustrialConveyor.ItemFilter item = new IndustrialConveyor.ItemFilter();
+                            item.TargetItem = ItemManager.FindItemDefinition(Convert.ToInt32(info[0]));
+                            item.MaxAmountInOutput = Convert.ToInt32(info[1]);
+                            item.BufferAmount = Convert.ToInt32(info[2]);
+                            item.MinAmountInInput = Convert.ToInt32(info[3]);
+                            itemFilters.Add(item);
+                        }
+                    }
+                }
+            }
+            catch { Puts("DeSerializeConveyorFilter Failed!"); }
+            return itemFilters;
+        }
+
+        private string SerializeConveyorFilter(List<IndustrialConveyor.ItemFilter> filterItems, string itemstring = "")
+        {
+            if (filterItems?.Count > 0)
+            {
+                foreach (var item in filterItems) { itemstring += item.TargetItem.itemid + "/" + item.MaxAmountInOutput + "/" + item.BufferAmount + "/" + item.MinAmountInInput + "\\"; }
+                return Convert.ToBase64String(Facepunch.Utility.Compression.Compress(Encoding.ASCII.GetBytes(itemstring)));
+            }
+            return itemstring;
+        }
+
+        private List<ProtoBuf.PatternFirework.Star> DeSerializeStarPattern(string stars)
+        {
+            List<ProtoBuf.PatternFirework.Star> starlist = new List<ProtoBuf.PatternFirework.Star>();
+            try
+            {
+                foreach (string datapoint in Encoding.ASCII.GetString(Facepunch.Utility.Compression.Uncompress(Convert.FromBase64String(stars))).Split('\\'))
+                {
+                    if (datapoint != null && !string.IsNullOrEmpty(datapoint))
+                    {
+                        string[] info = datapoint.Split('/');
+                        if (info.Length == 6)
+                        {
+                            ProtoBuf.PatternFirework.Star star = new ProtoBuf.PatternFirework.Star();
+                            star.position = new Vector2(Convert.ToSingle(info[0]), Convert.ToSingle(info[1]));
+                            star.color = new UnityEngine.Color(Convert.ToSingle(info[2]), Convert.ToSingle(info[3]), Convert.ToSingle(info[4]), Convert.ToSingle(info[5]));
+                            starlist.Add(star);
+                        }
+                    }
+                }
+            }
+            catch { Puts("DeSerializeStarPattern Failed!"); }
+            return starlist;
+        }
+
+        private string SerializeStarPattern(List<ProtoBuf.PatternFirework.Star> stars, string starstring = "")
+        {
+            if (stars?.Count > 0)
+            {
+                foreach (var star in stars) { starstring += star.position.x + "/" + star.position.y + "/" + star.color.r + "/" + star.color.g + "/" + star.color.b + "/" + star.color.a + "\\"; }
+                return Convert.ToBase64String(Facepunch.Utility.Compression.Compress(Encoding.ASCII.GetBytes(starstring)));
+            }
+            return starstring;
+        }
+
         private object TryPasteBack(string filename, IPlayer player, string[] args)
         {
             var path = _subDirectory + filename;
@@ -3861,6 +3943,7 @@ namespace Oxide.Plugins
             public IPlayer Player;
             public BasePlayer BasePlayer;
             public List<StabilityEntity> StabilityEntities = new List<StabilityEntity>();
+            public List<IndustrialStorageAdaptor> industrialStorageAdaptors = new List<IndustrialStorageAdaptor>();
             public Quaternion QuaternionRotation;
             public Action CallbackFinished;
             public Action<BaseEntity> CallbackSpawned;
