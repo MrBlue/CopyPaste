@@ -3058,13 +3058,21 @@ namespace Oxide.Plugins
                     if (datapoint != null && !string.IsNullOrEmpty(datapoint))
                     {
                         string[] info = datapoint.Split('/');
-                        if (info.Length == 4)
+                        if (info.Length == 6)
                         {
                             IndustrialConveyor.ItemFilter item = new IndustrialConveyor.ItemFilter();
-                            item.TargetItem = ItemManager.FindItemDefinition(Convert.ToInt32(info[0]));
+                            if (info[0] != "-1")
+                            {
+                                item.TargetItem = ItemManager.FindItemDefinition(Convert.ToInt32(info[0]));
+                            }
                             item.MaxAmountInOutput = Convert.ToInt32(info[1]);
                             item.BufferAmount = Convert.ToInt32(info[2]);
                             item.MinAmountInInput = Convert.ToInt32(info[3]);
+                            if (info[4] != "-1")
+                            {
+                                item.TargetCategory = (ItemCategory)Convert.ToInt32(info[4]);
+                            }
+                            item.IsBlueprint = Convert.ToBoolean(info[5]);
                             itemFilters.Add(item);
                         }
                     }
@@ -3078,7 +3086,7 @@ namespace Oxide.Plugins
         {
             if (filterItems?.Count > 0)
             {
-                foreach (var item in filterItems) { itemstring += item.TargetItem.itemid + "/" + item.MaxAmountInOutput + "/" + item.BufferAmount + "/" + item.MinAmountInInput + "\\"; }
+                foreach (var item in filterItems) { itemstring += (item.TargetItem ? item.TargetItem.itemid : "-1") + "/" + item.MaxAmountInOutput + "/" + item.BufferAmount + "/" + item.MinAmountInInput + "/" + (item.TargetCategory.HasValue ? (int) item.TargetCategory.Value : "-1") + "/" + item.IsBlueprint + "\\"; }
                 return Convert.ToBase64String(Facepunch.Utility.Compression.Compress(Encoding.ASCII.GetBytes(itemstring)));
             }
             return itemstring;
