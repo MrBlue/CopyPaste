@@ -503,7 +503,7 @@ namespace Oxide.Plugins
                             continue;
                         
                         copyData.RawData.Add(EntityData(entity, transform.position,
-                            transform.rotation.eulerAngles / 57.29578f, copyData));
+                            transform.rotation.eulerAngles / Mathf.Rad2Deg, copyData));
                     }
                 }
                 finally
@@ -1124,7 +1124,7 @@ namespace Oxide.Plugins
 
             var isItemReplace = !protocol.ContainsKey("items");
 
-            var eulerRotation = new Vector3(0f, rotationCorrection * 57.2958f, 0f);
+            var eulerRotation = new Vector3(0f, rotationCorrection * Mathf.Rad2Deg, 0f);
             var quaternionRotation = Quaternion.Euler(eulerRotation);
             
             // Parse VersionNumber
@@ -2565,7 +2565,7 @@ namespace Oxide.Plugins
             float rotationCorrection, bool deployables, bool inventories, bool auth, bool vending)
         {
             var eulerRotation = new Vector3(0f, rotationCorrection, 0f);
-            var quaternionRotation = Quaternion.EulerRotation(eulerRotation);
+            var quaternionRotation = Quaternion.Euler(eulerRotation * Mathf.Rad2Deg);
             var preloaddata = new HashSet<Dictionary<string, object>>();
 
             foreach (Dictionary<string, object> entity in entities)
@@ -2580,8 +2580,8 @@ namespace Oxide.Plugins
                     quaternionRotation * new Vector3(Convert.ToSingle(pos["x"]), Convert.ToSingle(pos["y"]),
                         Convert.ToSingle(pos["z"])) + startPos);
                 entity.Add("rotation",
-                    Quaternion.EulerRotation(eulerRotation + new Vector3(Convert.ToSingle(rot["x"]),
-                        Convert.ToSingle(rot["y"]), Convert.ToSingle(rot["z"]))));
+                    Quaternion.Euler((eulerRotation + new Vector3(Convert.ToSingle(rot["x"]),
+                        Convert.ToSingle(rot["y"]), Convert.ToSingle(rot["z"]))) * Mathf.Rad2Deg));
 
                 if (!inventories && entity.ContainsKey("items"))
                     entity["items"] = new List<object>();
