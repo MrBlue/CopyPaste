@@ -1119,7 +1119,7 @@ namespace Oxide.Plugins
             var quaternionRotation = Quaternion.Euler(eulerRotation);
             
             // Parse VersionNumber
-            var version = protocol["version"] as Dictionary<string, object>;
+            var version = protocol.ContainsKey("version") ? protocol["version"] as Dictionary<string, object> : null;
             
             VersionNumber vNumber = default;
             if (version != null)
