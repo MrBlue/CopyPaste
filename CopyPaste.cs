@@ -2,6 +2,7 @@
 // #define DEBUG
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
@@ -79,8 +80,13 @@ namespace Oxide.Plugins
         private bool _pasteReady;
         private readonly List<PasteData> _pendingPastes = new();
 
-        private Dictionary<string, Stack<List<BaseEntity>>> _lastPastes =
-            new Dictionary<string, Stack<List<BaseEntity>>>();
+        public class LastPaste
+        {
+            public string Filename;
+            public List<BaseEntity> Entities = new();
+        }
+
+        private Dictionary<string, Stack<LastPaste>> _lastPastes = new();
 
         private Dictionary<string, SignSize> _signSizes = new Dictionary<string, SignSize>
         {
@@ -157,41 +163,69 @@ namespace Oxide.Plugins
             BlockSpecifiedOnly = 4
         }
 
+        public enum LoopMode
+        {
+            TimedDelay = 1,
+            PerFrame = 2,
+            Instant = 3
+        }
         //Config
 
         private ConfigData _config;
 
         private class ConfigData
         {
-            [JsonProperty(PropertyName = "Copy Options")]
+            [JsonProperty(PropertyName = "Copy Options", Order = 7)]
             public CopyOptions Copy { get; set; }
 
-            [JsonProperty(PropertyName = "Paste Options")]
+            [JsonProperty(PropertyName = "Paste Options", Order = 8)]
             public PasteOptions Paste { get; set; }
 
             [JsonProperty(PropertyName =
-                "Amount of entities to paste per batch. Use to tweak performance impact of pasting")]
-            [DefaultValue(15)]
-            public int PasteBatchSize = 15;
+                "Amount of entities to paste per batch. Use to tweak performance impact of pasting",  Order = 1)]
+            [DefaultValue(5)]
+            public int PasteBatchSize = 5;
 
             [JsonProperty(PropertyName =
-                "Amount of entities to copy per batch. Use to tweak performance impact of copying")]
+                "Amount of entities to copy per batch. Use to tweak performance impact of copying",  Order = 2)]
             [DefaultValue(100)]
             public int CopyBatchSize = 100;
 
             [JsonProperty(PropertyName =
-                "Amount of entities to undo per batch. Use to tweak performance impact of undoing")]
-            [DefaultValue(15)]
-            public int UndoBatchSize = 15;
+                "Amount of entities to undo per batch. Use to tweak performance impact of undoing",  Order = 3)]
+            [DefaultValue(5)]
+            public int UndoBatchSize = 5;
+
+            [JsonProperty(PropertyName = "Loop Execution", Order = 4)]
+            public LoopExecutionConfig LoopExecution { get; set; } = new();
 
             [JsonProperty(PropertyName =
-                "Prevent These Prefabs From Spawning", ObjectCreationHandling = ObjectCreationHandling.Replace),
+                "Prevent These Prefabs From Spawning", ObjectCreationHandling = ObjectCreationHandling.Replace, Order = 5),
             DefaultValue(typeof(List<string>), "")]
             public List<string> BlockedPrefabs = new();
 
-            [JsonProperty(PropertyName = "Enable data saving feature")]
+            [JsonProperty(PropertyName = "Enable data saving feature", Order = 6)]
             [DefaultValue(true)]
             public bool DataSaving = true;
+
+            public class LoopExecutionConfig
+            {
+                [JsonProperty(PropertyName = "Mode: (1=timed delay [safest], 2=per-frame [balanced], 3=instant [lag])", Order = 1)]
+                [DefaultValue((int)LoopMode.TimedDelay)]
+                public int Mode { get; set; } = (int)LoopMode.TimedDelay;
+
+                [JsonProperty(PropertyName = "Timed delay between paste batches, in seconds", Order = 2)]
+                [DefaultValue(0.075)]
+                public float PasteBatchDelay = 0.075f;
+
+                [JsonProperty(PropertyName = "Timed delay between copy batches, in seconds", Order = 3)]
+                [DefaultValue(0.075)]
+                public float CopyBatchDelay = 0.075f;
+
+                [JsonProperty(PropertyName = "Timed delay between undo batches, in seconds", Order = 4)]
+                [DefaultValue(0.075)]
+                public float UndoBatchDelay = 0.075f;
+            }
 
             public class CopyOptions
             {
@@ -265,6 +299,9 @@ namespace Oxide.Plugins
 
             _config = Config.ReadObject<ConfigData>();
 
+            _config.Copy ??= new();
+            _config.Paste ??= new();
+            _config.LoopExecution ??= new();
             _config.BlockedPrefabs ??= new();
             _config.Paste.SpecifiedSkins ??= new();
 
@@ -273,6 +310,15 @@ namespace Oxide.Plugins
                 PrintWarning("Invalid config value specified for 'Skins', resetting to default of 1 (all skins)");
                 _config.Paste.SkinsMode = (int)SkinsMode.AllSkins;
             }
+
+            if (!IsValidLoopMode(_config.LoopExecution.Mode))
+            {
+                PrintWarning("Invalid config value specified for 'Loop Execution Mode', resetting to default of 1 (timed delay)");
+                _config.LoopExecution.Mode = (int)LoopMode.TimedDelay;
+            }
+
+            if (_config.LoopExecution.Mode == (int)LoopMode.Instant)
+                PrintWarning("Loop execution mode is set to instant. Large operations can lag the server and may kick players.");
 
             for (var i = 0; i < _config.Paste.SpecifiedSkins.Count; i++)
             {
@@ -296,13 +342,16 @@ namespace Oxide.Plugins
             var configData = new ConfigData
             {
                 Copy = new ConfigData.CopyOptions(),
-                Paste = new ConfigData.PasteOptions()
+                Paste = new ConfigData.PasteOptions(),
+                LoopExecution = new ConfigData.LoopExecutionConfig()
             };
 
             Config.WriteObject(configData, true);
         }
 
         private bool IsValidSkinsMode(int mode) => Enum.IsDefined(typeof(SkinsMode), mode);
+
+        private bool IsValidLoopMode(int opt) => Enum.IsDefined(typeof(LoopMode), opt);
 
         //Hooks
 
@@ -393,7 +442,10 @@ namespace Oxide.Plugins
             for (int i = 0; i < _pendingPastes.Count; i++)
             {
                 var pasteData = _pendingPastes[i];
-                timer.Once(i * 0.1f, () => PasteLoop(pasteData));
+                timer.Once(i * 0.1f, () =>
+                {
+                    pasteData.StartLoop(PasteLoop(pasteData));
+                });
             }
             _pendingPastes.Clear();
         }
@@ -512,18 +564,18 @@ namespace Oxide.Plugins
         }
 
         private object TryPasteFromVector3(Vector3 pos, float rotationCorrection, string filename, string[] args,
-            Action callback = null, Action<BaseEntity> callbackSpawned = null)
+            Action callback = null, Action<BaseEntity> callbackSpawned = null, int loopMode = 0)
         {
             return TryPaste(pos, filename, _consolePlayer, rotationCorrection, args, callback: callback,
-                callbackSpawned: callbackSpawned).Item1;
+                callbackSpawned: callbackSpawned, loopMode: loopMode).Item1;
         }
 
         private ValueTuple<object, Action> TryPasteFromVector3Cancellable(Vector3 pos, float rotationCorrection,
             string filename, string[] args,
-            Action callback = null, Action<BaseEntity> callbackSpawned = null)
+            Action callback = null, Action<BaseEntity> callbackSpawned = null, int loopMode = 0)
         {
             var result = TryPaste(pos, filename, _consolePlayer, rotationCorrection, args, callback: callback,
-                callbackSpawned: callbackSpawned);
+                callbackSpawned: callbackSpawned, loopMode: loopMode);
 
             var pasteData = result.Item2;
 
@@ -607,8 +659,11 @@ namespace Oxide.Plugins
             entity.Kill();
         }
 
-        private void UndoLoop(HashSet<BaseEntity> entities, IPlayer player, int count = 0)
+        private IEnumerator UndoLoop(UndoData undoData)
         {
+            var entities = undoData.EntitiesToUndo;
+            var player = undoData.Player;
+
             for (var i = entities.Count - 1; i >= 0; i--)
             {
                 var baseEntity = entities.ElementAt(i);
@@ -619,30 +674,20 @@ namespace Oxide.Plugins
                 }
             }
 
+            int entityIndex = 0;
             // Take an amount of entities from the entity list (defined in config) and kill them. Will be repeated for every tick until there are no entities left.
-            entities
-                .Take(_config.UndoBatchSize)
-                .ToList()
-                .ForEach(p =>
-                {
-                    entities.Remove(p);
-                    RemoveEntity(p);
-                });
-
-            // If it gets stuck in infinite loop break the loop.
-            if (count != 0 && entities.Count != 0 && entities.Count == count)
+            foreach (var p in entities)
             {
-                player?.Reply("Undo cancelled because of infinite loop.");
-                return;
+                RemoveEntity(p);
+                if (++entityIndex % _config.UndoBatchSize == 0 && undoData.TryGetBatchYield(_config.LoopExecution.UndoBatchDelay, out var batchYield))
+                    yield return batchYield;
             }
 
-            if (entities.Count > 0)
-                NextTick(() => UndoLoop(entities, player, entities.Count));
-            else if (player != null)
+            if (player != null)
             {
-                player.Reply(Lang("UNDO_SUCCESS", player.Id));
+                player.Reply(Lang("UNDO_SUCCESS", player.Id) + ": " + undoData.Filename);
 
-                if (_lastPastes.ContainsKey(player.Id) && _lastPastes[player.Id].Count == 0)
+                if (_lastPastes.TryGetValue(player.Id, out var checkFrom) && checkFrom.Count == 0)
                     _lastPastes.Remove(player.Id);
             }
         }
@@ -670,126 +715,127 @@ namespace Oxide.Plugins
                 SourceRot = sourceRot,
                 Player = player,
                 BasePlayer = player.Object as BasePlayer,
-                Callback = callback
+                Callback = callback,
+                ExecutionMode = (LoopMode)_config.LoopExecution.Mode
             };
 
             copyData.CheckFrom.Push(sourcePos);
 
-            NextTick(() => CopyLoop(copyData));
+            copyData.StartLoop(CopyLoop(copyData));
         }
 
         // Main loop for copy, will fetch all the data needed. Is called every tick untill copy is done (can't find any entities)
-        private void CopyLoop(CopyData copyData)
+        private IEnumerator CopyLoop(CopyData copyData)
         {
             var checkFrom = copyData.CheckFrom;
             var houseList = copyData.HouseList;
             var buildingId = copyData.BuildingId;
             var copyMechanics = copyData.CopyMechanics;
-            var batchSize = checkFrom.Count < _config.CopyBatchSize ? checkFrom.Count : _config.CopyBatchSize;
             var range = copyData.Range;
 
-            for (var i = 0; i < batchSize; i++)
+            while (checkFrom.Count > 0)
             {
-                if (checkFrom.Count == 0)
-                    break;
+                var batchSize = checkFrom.Count < _config.CopyBatchSize ? checkFrom.Count : _config.CopyBatchSize;
 
-                var list = Pool.Get<List<BaseEntity>>();
-                try
+                for (var i = 0; i < batchSize; i++)
                 {
-                    Vis.Entities(checkFrom.Pop(), range, list, copyData.CurrentLayer);
-
-                    foreach (var entity in list)
+                    if (checkFrom.Count == 0)
+                        break;
+                    
+                    var list = Pool.Get<List<BaseEntity>>();
+                    try
                     {
-                        // Skip entities that are already in the list
-                        if (!entity.IsValid() || entity.HasParent())
-                            continue;
-                        
-                        // Skip metal detector flags
-                        if (entity.GetComponent<MetalDetectorSource>() != null)
-                            continue;
-                        
-                        if (!houseList.Add(entity))
-                            continue;
+                        Vis.Entities(checkFrom.Pop(), range, list, copyData.CurrentLayer);
 
-                        var buildingBlock = entity as BuildingBlock;
-                        if (copyMechanics == CopyMechanics.Building)
+                        foreach (var entity in list)
                         {
-                            buildingBlock ??= entity.GetComponentInParent<BuildingBlock>();
+                            // Skip entities that are already in the list
+                            if (!entity.IsValid() || entity.HasParent())
+                                continue;
+
+                            // Skip metal detector flags
+                            if (entity.GetComponent<MetalDetectorSource>() != null)
+                                continue;
+
+                            if (!houseList.Add(entity))
+                                continue;
+
+                            var buildingBlock = entity as BuildingBlock;
+                            if (copyMechanics == CopyMechanics.Building)
+                            {
+                                buildingBlock ??= entity.GetComponentInParent<BuildingBlock>();
+
+                                if (buildingBlock != null)
+                                {
+                                    if (buildingId == 0)
+                                        buildingId = buildingBlock.buildingID;
+
+                                    if (buildingId != buildingBlock.buildingID)
+                                        continue;
+                                }
+                            }
 
                             if (buildingBlock != null)
-                            {
-                                if (buildingId == 0)
-                                    buildingId = buildingBlock.buildingID;
+                                QueueConnectedBlocks(copyData, buildingBlock);
 
-                                if (buildingId != buildingBlock.buildingID)
-                                    continue;
-                            }
+                            var transform = entity.transform;
+                            if (copyData.EachToEach && copyData.ScannedPositions.Add(transform.position))
+                                checkFrom.Push(transform.position);
+
+                            if (entity.GetComponent<BaseLock>() != null)
+                                continue;
+
+                            copyData.RawData.Add(EntityData(entity, transform.position,
+                                transform.rotation.eulerAngles / Mathf.Rad2Deg, copyData));
                         }
-
-                        if (buildingBlock != null)
-                            QueueConnectedBlocks(copyData, buildingBlock);
-
-                        var transform = entity.transform;
-                        if (copyData.EachToEach && copyData.ScannedPositions.Add(transform.position))
-                            checkFrom.Push(transform.position);
-
-                        if (entity.GetComponent<BaseLock>() != null)
-                            continue;
-                        
-                        copyData.RawData.Add(EntityData(entity, transform.position,
-                            transform.rotation.eulerAngles / Mathf.Rad2Deg, copyData));
                     }
-                }
-                finally
-                {
-                    Pool.FreeUnmanaged(ref list);
-                }
-
-                copyData.BuildingId = buildingId;
-            }
-
-            if (checkFrom.Count > 0)
-            {
-                NextTick(() => CopyLoop(copyData));
-            }
-            else
-            {
-                var path = _subDirectory + copyData.Filename;
-                var datafile = Interface.Oxide.DataFileSystem.GetFile(path);
-
-                datafile.Clear();
-
-                var sourcePos = copyData.SourcePos;
-
-                datafile["default"] = new Dictionary<string, object>
-                {
+                    finally
                     {
-                        "position", new Dictionary<string, object>
+                        Pool.FreeUnmanaged(ref list);
+                    }
+
+                    copyData.BuildingId = buildingId;
+                }
+
+                if (checkFrom.Count > 0 && copyData.TryGetBatchYield(_config.LoopExecution.CopyBatchDelay, out var batchYield))
+                    yield return batchYield;
+            }
+
+            var path = _subDirectory + copyData.Filename;
+            var datafile = Interface.Oxide.DataFileSystem.GetFile(path);
+
+            datafile.Clear();
+
+            var sourcePos = copyData.SourcePos;
+
+            datafile["default"] = new Dictionary<string, object>
+            {
+                {
+                    "position", new Dictionary<string, object>
                         {
                             { "x", sourcePos.x.ToString() },
                             { "y", sourcePos.y.ToString() },
                             { "z", sourcePos.z.ToString() }
                         }
-                    },
-                    { "rotationy", copyData.SourceRot.y.ToString() },
-                    { "rotationdiff", copyData.RotCor.ToString() }
-                };
+                },
+                { "rotationy", copyData.SourceRot.y.ToString() },
+                { "rotationdiff", copyData.RotCor.ToString() }
+            };
 
-                datafile["entities"] = copyData.RawData;
-                datafile["protocol"] = new Dictionary<string, object>
-                {
-                    { "items", 2 },
-                    { "version", Version }
-                };
+            datafile["entities"] = copyData.RawData;
+            datafile["protocol"] = new Dictionary<string, object>
+            {
+                { "items", 2 },
+                { "version", Version }
+            };
 
-                Interface.Oxide.DataFileSystem.SaveDatafile(path);
+            Interface.Oxide.DataFileSystem.SaveDatafile(path);
 
-                copyData.Player.Reply(Lang("COPY_SUCCESS", copyData.Player.Id, copyData.Filename));
+            copyData.Player.Reply(Lang("COPY_SUCCESS", copyData.Player.Id, copyData.Filename));
 
-                copyData.Callback?.Invoke();
+            copyData.Callback?.Invoke();
 
-                Interface.CallHook("OnCopyFinished", copyData.RawData, copyData.Filename, copyData.Player, copyData.SourcePos);
-            }
+            Interface.CallHook("OnCopyFinished", copyData.RawData, copyData.Filename, copyData.Player, copyData.SourcePos);
         }
 
         private void QueueConnectedBlocks(CopyData copyData, BuildingBlock block)
@@ -1639,7 +1685,7 @@ namespace Oxide.Plugins
         private PasteData Paste(ICollection<Dictionary<string, object>> entities, Dictionary<string, object> protocol,
             bool ownership, Vector3 startPos, IPlayer player, bool stability, float rotationCorrection,
             float heightAdj, bool auth, Action callback, Action<BaseEntity> callbackSpawned, string filename,
-            bool checkPlaced, bool enableSaving = true, bool? dlc = null, int? skinsMode = null)
+            bool checkPlaced, bool enableSaving = true, bool? dlc = null, int? skinsMode = null, int? loopMode = null)
         {
             //Settings
 
@@ -1676,7 +1722,10 @@ namespace Oxide.Plugins
                 Dlc = dlc ?? _config.Paste.Dlc,
                 SkinsMode = (SkinsMode)(skinsMode.HasValue && IsValidSkinsMode(skinsMode.Value)
                     ? skinsMode.Value
-                    : _config.Paste.SkinsMode)
+                    : _config.Paste.SkinsMode),
+                ExecutionMode = (LoopMode)(loopMode.HasValue && IsValidLoopMode(loopMode.Value)
+                    ? loopMode.Value
+                    : _config.LoopExecution.Mode)
             };
 
             if (!_pasteReady)
@@ -1685,102 +1734,106 @@ namespace Oxide.Plugins
                 _pendingPastes.Add(pasteData);
             }
             else
-                NextTick(() => PasteLoop(pasteData));
+                NextTick(() => pasteData.StartLoop(PasteLoop(pasteData)));
 
             return pasteData;
         }
 
-        private void PasteLoop(PasteData pasteData)
+        private IEnumerator PasteLoop(PasteData pasteData)
         {
             if (pasteData.Cancelled)
             {
-                UndoLoop(new HashSet<BaseEntity>(pasteData.PastedEntities), pasteData.Player,
-                    pasteData.PastedEntities.Count);
-                
-                return;
+                var undoData = new UndoData
+                {
+                    EntitiesToUndo = pasteData.PastedEntities,
+                    Player = pasteData.Player,
+                    ExecutionMode = pasteData.ExecutionMode,
+                    Filename = pasteData.Filename
+                };
+
+                undoData.StartLoop(UndoLoop(undoData));
+
+                yield break;
             }
 
-            var entities = pasteData.Entities;
-            var todo = entities.Take(_config.PasteBatchSize).ToArray();
+            int entityIndex = 0;
 
-            foreach (var data in todo)
+            foreach (var data in pasteData.Entities.ToList())
             {
-                entities.Remove(data);
+                pasteData.Entities.Remove(data);
 
                 PasteEntity(data, pasteData);
+
+                if (++entityIndex % _config.PasteBatchSize == 0 && pasteData.TryGetBatchYield(_config.LoopExecution.PasteBatchDelay, out var batchYield))
+                    yield return batchYield;
             }
 
-            if (entities.Count > 0)
-                NextTick(() => PasteLoop(pasteData));
-            else
+            // Adjust IOEntity positions to fix alignment issues for older file versions
+            if (pasteData.Version < new VersionNumber(4, 2, 0))
+                pasteData.checkPosition = Pool.Get<List<IOEntity>>();
+
+            foreach (var ioData in pasteData.EntityLookup.Values.ToArray())
+                ProgressIOEntity(ioData, pasteData);
+
+            if (pasteData.checkPosition != null)
             {
+                AdjustIOEntityPositions(pasteData);
+                Pool.FreeUnmanaged(ref pasteData.checkPosition);
+            }
 
-                // Adjust IOEntity positions to fix alignment issues for older file versions
-                if (pasteData.Version < new VersionNumber(4, 2, 0))
-                    pasteData.checkPosition = Pool.Get<List<IOEntity>>();
+            foreach (var keyPair in pasteData.ItemsWithSubEntity)
+            {
+                SetItemSubEntity(pasteData, keyPair.Value, keyPair.Key);
+            }
 
-                foreach (var ioData in pasteData.EntityLookup.Values.ToArray())
-                    ProgressIOEntity(ioData, pasteData);
+            if (pasteData.Version <= new VersionNumber(4, 2, 7))
+                SnapLegacyFloorFrameEntities(pasteData);
 
-                if (pasteData.checkPosition != null)
+            foreach (var entity in pasteData.StabilityEntities)
+            {
+                entity.grounded = false;
+                entity.InitializeSupports();
+                entity.UpdateStability();
+            }
+
+            foreach (var adapter in pasteData.industrialStorageAdaptors)
+            {
+                if (adapter == null) { continue; }
+                if (!adapter.HasParent())
                 {
-                    AdjustIOEntityPositions(pasteData);
-                    Pool.FreeUnmanaged(ref pasteData.checkPosition);
-                }
-
-                foreach (var keyPair in pasteData.ItemsWithSubEntity)
-                {
-                    SetItemSubEntity(pasteData, keyPair.Value, keyPair.Key);
-                }
-
-                if (pasteData.Version <= new VersionNumber(4, 2, 7))
-                    SnapLegacyFloorFrameEntities(pasteData);
-
-                foreach (var entity in pasteData.StabilityEntities)
-                {
-                    entity.grounded = false;
-                    entity.InitializeSupports();
-                    entity.UpdateStability();
-                }
-
-                foreach (var adapter in pasteData.industrialStorageAdaptors)
-                {
-                    if (adapter == null) { continue; }
-                    if (!adapter.HasParent())
+                    List<BaseEntity> ents = Facepunch.Pool.Get<List<BaseEntity>>();
+                    Vis.Entities(adapter.transform.position + (adapter.transform.up * -0.2f), 0.01f, ents);
+                    if (ents.Count > 0)
                     {
-                        List<BaseEntity> ents = Facepunch.Pool.Get<List<BaseEntity>>();
-                        Vis.Entities(adapter.transform.position + (adapter.transform.up * -0.2f), 0.01f, ents);
-                        if (ents.Count > 0)
-                        {
-                            adapter.SetParent(ents[0], true, true);
-                        }
-                        Facepunch.Pool.FreeUnmanaged(ref ents);
+                        adapter.SetParent(ents[0], true, true);
                     }
-                    adapter.MarkDirtyForceUpdateOutputs();
-                    adapter.SendNetworkUpdateImmediate();
-                    adapter.RefreshIndustrialPreventBuilding();
-                    adapter.NotifyIndustrialNetworkChanged();
+                    Facepunch.Pool.FreeUnmanaged(ref ents);
                 }
+                adapter.MarkDirtyForceUpdateOutputs();
+                adapter.SendNetworkUpdateImmediate();
+                adapter.RefreshIndustrialPreventBuilding();
+                adapter.NotifyIndustrialNetworkChanged();
+            }
 
-                pasteData.FinalProcessingActions.ForEach(action => action());
+            pasteData.FinalProcessingActions.ForEach(action => action());
 
-                TrySplitPastedBuilding(pasteData);
-                PasteDelayedCupboards(pasteData);
+            TrySplitPastedBuilding(pasteData);
+            PasteDelayedCupboards(pasteData);
 
-                pasteData.Player.Reply(Lang("PASTE_SUCCESS", pasteData.Player.Id));
+            pasteData.Player.Reply(Lang("PASTE_SUCCESS", pasteData.Player.Id) + ": " + pasteData.Filename);
+
 #if DEBUG
-                pasteData.Player.Reply($"Stopwatch took: {pasteData.Sw.Elapsed.TotalMilliseconds} ms");
+            pasteData.Player.Reply($"Stopwatch took: {pasteData.Sw.Elapsed.TotalMilliseconds} ms");
 #endif
 
-                if (!_lastPastes.ContainsKey(pasteData.Player.Id))
-                    _lastPastes[pasteData.Player.Id] = new Stack<List<BaseEntity>>();
+            if (!_lastPastes.TryGetValue(pasteData.Player.Id, out var checkFrom))
+                _lastPastes[pasteData.Player.Id] = checkFrom = new();
 
-                _lastPastes[pasteData.Player.Id].Push(pasteData.PastedEntities);
+            checkFrom.Push(new() { Entities = pasteData.PastedEntities, Filename = pasteData.Filename });
 
-                pasteData.CallbackFinished?.Invoke();
+            pasteData.CallbackFinished?.Invoke();
 
-                Interface.CallHook("OnPasteFinished", pasteData.PastedEntities, pasteData.Filename, pasteData.Player, pasteData.StartPos);
-            }
+            Interface.CallHook("OnPasteFinished", pasteData.PastedEntities, pasteData.Filename, pasteData.Player, pasteData.StartPos);
         }
 
         private void TrySplitPastedBuilding(PasteData pasteData)
@@ -4697,7 +4750,7 @@ namespace Oxide.Plugins
         private ValueTuple<object, PasteData> TryPaste(Vector3 startPos, string filename, IPlayer player,
             float rotationCorrection,
             string[] args, bool autoHeight = true, Action callback = null,
-            Action<BaseEntity> callbackSpawned = null)
+            Action<BaseEntity> callbackSpawned = null, int? loopMode = null)
         {
             var userId = player?.Id;
 
@@ -4875,7 +4928,7 @@ namespace Oxide.Plugins
 
             var pasteData = Paste(preloadData, protocol, ownership, startPos, player, stability, rotationCorrection,
                 autoHeight ? heightAdj : 0, auth, callback, callbackSpawned, filename, checkPlaced, enableSaving,
-                dlc, skinsMode);
+                dlc, skinsMode, loopMode);
 
             return new ValueTuple<object, PasteData>(true, pasteData);
         }
@@ -5242,15 +5295,23 @@ namespace Oxide.Plugins
                 return;
             }
 
-            if (!_lastPastes.ContainsKey(player.Id))
+            if (!_lastPastes.TryGetValue(player.Id, out var checkFrom))
             {
                 player.Reply(Lang("NO_PASTED_STRUCTURE", player.Id));
                 return;
             }
 
-            var entities = new HashSet<BaseEntity>(_lastPastes[player.Id].Pop().ToList());
+            LastPaste lastPaste = checkFrom.Pop();
 
-            UndoLoop(entities, player);
+            var undoData = new UndoData
+            {
+                EntitiesToUndo = lastPaste.Entities,
+                Player = player,
+                ExecutionMode = (LoopMode)_config.LoopExecution.Mode,
+                Filename = lastPaste.Filename
+            };
+
+            undoData.StartLoop(UndoLoop(undoData));
         }
 
         private static readonly Dictionary<string, string> ReplacePrefab = new Dictionary<string, string>
@@ -5911,7 +5972,7 @@ namespace Oxide.Plugins
                 }
             };
 
-        public class CopyData
+        public class CopyData : LoopManager
         {
             public IPlayer Player;
             public BasePlayer BasePlayer;
@@ -5938,7 +5999,7 @@ namespace Oxide.Plugins
 #endif
         }
 
-        public class PasteData
+        public class PasteData : LoopManager
         {
             public ICollection<Dictionary<string, object>> Entities;
             public List<BaseEntity> PastedEntities = new List<BaseEntity>();
@@ -5984,6 +6045,48 @@ namespace Oxide.Plugins
 #if DEBUG
             public Stopwatch Sw = new Stopwatch();
 #endif
+        }
+
+        public class UndoData : LoopManager
+        {
+            public List<BaseEntity> EntitiesToUndo;
+            public IPlayer Player;
+            public string Filename;
+        }
+
+        public class LoopManager
+        {
+            public LoopMode ExecutionMode = LoopMode.TimedDelay;
+
+            public void StartLoop(IEnumerator iEnumerator)
+            {
+                if (ExecutionMode == LoopMode.Instant)
+                {
+                    while (iEnumerator.MoveNext()) { }
+                }
+                else
+                {
+                    ServerMgr.Instance.StartCoroutine(iEnumerator);
+                }
+            }
+
+            public bool TryGetBatchYield(float batchWait, out object batchYield)
+            {
+                if (ExecutionMode == LoopMode.TimedDelay)
+                {
+                    batchYield = CoroutineEx.waitForSeconds(batchWait);
+                    return true;
+                }
+
+                if (ExecutionMode == LoopMode.PerFrame)
+                {
+                    batchYield = null;
+                    return true;
+                }
+
+                batchYield = null;
+                return false;
+            }
         }
 
         public class PlayerBoatData
