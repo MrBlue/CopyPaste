@@ -344,7 +344,7 @@ namespace Oxide.Plugins
 
                 foreach (var ent in ents)
                 {
-                    if (ent.PrefabName != prefabname)
+                    if (ent.IsDestroyed || ent.PrefabName != prefabname)
                         continue;
 
                     if (Vector3.Distance(ent.transform.position, pos) > maxDiff)
@@ -471,7 +471,7 @@ namespace Oxide.Plugins
                     foreach (var entity in list)
                     {
                         // Skip entities that are already in the list
-                        if (entity.HasParent())
+                        if (!entity.IsValid() || entity.HasParent())
                             continue;
                         
                         // Skip metal detector flags
@@ -613,7 +613,7 @@ namespace Oxide.Plugins
                 var children = new List<object>();
                 foreach (var child in entity.children)
                 {
-                    if (child == null)
+                    if (!child.IsValid())
                         continue;
                     
                     children.Add(EntityData(child, child.transform.position, child.transform.rotation.eulerAngles, copyData));
@@ -894,7 +894,7 @@ namespace Oxide.Plugins
 
             var ioEntity = entity as IOEntity;
 
-            if (ioEntity != null)
+            if (ioEntity.IsValid() && !ioEntity.IsDestroyed)
             {
                 var ioData = new Dictionary<string, object>();
                 var inputs = ioEntity.inputs.Select(input => new Dictionary<string, object>
@@ -1386,6 +1386,9 @@ namespace Oxide.Plugins
             if (!entity.isSpawned)
                 entity.Spawn();
 
+            if (entity.net == null || entity.IsDestroyed)
+                return;
+
             var baseCombat = entity as BaseCombatEntity;
             if (buildingBlock != null)
             {
@@ -1873,7 +1876,7 @@ namespace Oxide.Plugins
             }
 
             var ioEntity = entity as IOEntity;
-            if (ioEntity != null)
+            if (ioEntity.IsValid() && !ioEntity.IsDestroyed)
             {
                 var ioData = new Dictionary<string, object>();
 
@@ -1943,7 +1946,7 @@ namespace Oxide.Plugins
             {
                 if (pasteData.EntityLookup.TryGetValue(Convert.ToUInt64(data["photoEntity"]), out var objData))
                 {
-                    if (objData["entity"] is BaseEntity baseEntity && baseEntity != null && !baseEntity.IsDestroyed && baseEntity.net.ID.IsValid)
+                    if (objData["entity"] is BaseEntity baseEntity && baseEntity.IsValid() && !baseEntity.IsDestroyed && baseEntity.net.ID.IsValid)
                     {
                         photoFrame._photoEntity.uid = baseEntity.net.ID;
                     }
@@ -1966,7 +1969,7 @@ namespace Oxide.Plugins
 
             var ioEntity = ioData["entity"] as IOEntity;
 
-            if (ioEntity == null)
+            if (!ioEntity.IsValid() || ioEntity.IsDestroyed)
                 return;
 
             List<object> inputs = null;
@@ -2101,6 +2104,10 @@ namespace Oxide.Plugins
                         {
                             var ioOutput = ioEntity.outputs[index];
                             var ioEntity2 = ioConnection["entity"] as IOEntity;
+
+                            if (!ioEntity2.IsValid() || ioEntity2.IsDestroyed)
+                                continue;
+
                             var connectedToSlot = Convert.ToInt32( output["connectedToSlot"] );
                             var ioInput = ioEntity2.inputs[connectedToSlot];
 
@@ -2167,7 +2174,7 @@ namespace Oxide.Plugins
                                     if (pasteData.EntityLookup.TryGetValue(Convert.ToUInt64(lineAnchor["entityRefID"]), out var data))
                                     {
                                         var door = data["entity"] as Door;
-                                        if (door != null)
+                                        if (door.IsValid())
                                         {
                                             ioOutput.lineAnchors[i] = new IOEntity.LineAnchor
                                             {
@@ -2196,7 +2203,7 @@ namespace Oxide.Plugins
         {
             if (item != null && oldId != 0 && pasteData.EntityLookup.TryGetValue(oldId, out var data))
             {
-                if (data["entity"] is BaseEntity subEntity && subEntity != null && !subEntity.IsDestroyed && subEntity.net.ID.IsValid)
+                if (data["entity"] is BaseEntity subEntity && subEntity.IsValid() && !subEntity.IsDestroyed && subEntity.net.ID.IsValid)
                 {
                     if (item.instanceData == null)
                         item.instanceData = new ProtoBuf.Item.InstanceData();
@@ -2268,7 +2275,7 @@ namespace Oxide.Plugins
                         var children = new List<object>();
                         foreach (var child in heldEnt.children)
                         {
-                            if (child == null)
+                            if (!child.IsValid())
                                 continue;
 
                             children.Add(EntityData(child, child.transform.position,
@@ -2496,7 +2503,7 @@ namespace Oxide.Plugins
 
         void ExtractCassette(Dictionary<string, object> data, Cassette cassette)
         {
-            if (cassette != null)
+            if (cassette.IsValid())
             {
                 uint[] contentCRCs = cassette.GetContentCRCs;
                 if (contentCRCs != null && contentCRCs.Length == 1)
