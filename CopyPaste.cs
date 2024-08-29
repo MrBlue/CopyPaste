@@ -152,6 +152,11 @@ namespace Oxide.Plugins
             [DefaultValue(15)]
             public int UndoBatchSize = 15;
 
+            [JsonProperty(PropertyName =
+                "Prevent These Prefabs From Spawning", ObjectCreationHandling = ObjectCreationHandling.Replace),
+            DefaultValue(typeof(List<string>), "")]
+            public List<string> BlockedPrefabs = new();
+
             [JsonProperty(PropertyName = "Enable data saving feature")]
             [DefaultValue(true)]
             public bool DataSaving = true;
@@ -208,6 +213,8 @@ namespace Oxide.Plugins
             Config.Settings.DefaultValueHandling = DefaultValueHandling.Populate;
 
             _config = Config.ReadObject<ConfigData>();
+
+            _config.BlockedPrefabs ??= new();
 
             Config.WriteObject(_config, true);
         }
@@ -1269,6 +1276,9 @@ namespace Oxide.Plugins
 
             // Used to copy locks for no reason in previous versions (is included in the slots info so no need to copy locks) so just skipping them.
             if (prefabname.Contains("locks") && pasteData.Version < new VersionNumber(4, 2, 0))
+                return;
+
+            if (_config.BlockedPrefabs.Exists(prefabname.Contains))
                 return;
 
             BaseEntity entity = null;
