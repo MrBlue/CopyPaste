@@ -1995,6 +1995,11 @@ namespace Oxide.Plugins
             if (timerSwitch != null && ioData.ContainsKey("timerLength"))
             {
                 timerSwitch.timerLength = Convert.ToSingle(ioData["timerLength"]);
+                if(timerSwitch.IsOn())
+                {
+                    timerSwitch.SetFlag(BaseEntity.Flags.On, false);
+                    timerSwitch.SwitchPressed();
+                }
             }
 
             var rfBroadcaster = ioEntity as RFBroadcaster;
