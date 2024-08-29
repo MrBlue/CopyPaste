@@ -2,6 +2,7 @@
 // #define DEBUG
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
@@ -143,6 +144,11 @@ namespace Oxide.Plugins
             public int PasteBatchSize = 15;
 
             [JsonProperty(PropertyName =
+                 "Time, in seconds, to wait between paste batches. Use to tweak performance impact of pasting"),
+             DefaultValue(0.075)]
+            public float PasteBatchWait = 0.075f;
+
+            [JsonProperty(PropertyName =
                 "Amount of entities to copy per batch. Use to tweak performance impact of copying")]
             [DefaultValue(100)]
             public int CopyBatchSize = 100;
@@ -151,6 +157,11 @@ namespace Oxide.Plugins
                 "Amount of entities to undo per batch. Use to tweak performance impact of undoing")]
             [DefaultValue(15)]
             public int UndoBatchSize = 15;
+
+            [JsonProperty(PropertyName =
+                 "Time, in seconds, to wait between undo batches. Use to tweak performance impact of undoing"),
+             DefaultValue(0.075)]
+            public float UndoBatchWait = 0.075f;
 
             [JsonProperty(PropertyName = "Enable data saving feature")]
             [DefaultValue(true)]
@@ -368,52 +379,39 @@ namespace Oxide.Plugins
             }
         }
 
-        private void UndoLoop(HashSet<BaseEntity> entities, IPlayer player, int count = 0)
+        private IEnumerator UndoLoop(HashSet<BaseEntity> entities, IPlayer player)
         {
-            foreach (var storageContainer in entities.OfType<StorageContainer>().Where(x => !x.IsDestroyed))
+            foreach (var p in entities)
             {
-                storageContainer.Kill();
-            }
-
-            // Take an amount of entities from the entity list (defined in config) and kill them. Will be repeated for every tick until there are no entities left.
-            entities
-                .Take(_config.UndoBatchSize)
-                .ToList()
-                .ForEach(p =>
+                if (p is IItemContainerEntity && !p.IsDestroyed)
                 {
-                    entities.Remove(p);
-
-                    // Cleanup the hotspot beloning to the node.
-                    var ore = p as OreResourceEntity;
-                    if (ore != null)
-                    {
-                        ore.CleanupBonus();
-                    }
-
-                    var io = p as IOEntity;
-                    if (io != null)
-                    {
-                        io.ClearConnections();
-                    }
-
-                    if (p != null && !p.IsDestroyed)
-                        p.Kill();
-                });
-
-            // If it gets stuck in infinite loop break the loop.
-            if (count != 0 && entities.Count != 0 && entities.Count == count)
-            {
-                player?.Reply("Undo cancelled because of infinite loop.");
-                return;
+                    p.Kill();
+                }
             }
 
-            if (entities.Count > 0)
-                NextTick(() => UndoLoop(entities, player, entities.Count));
-            else if (player != null)
+            int entityIndex = 0;
+            // Take an amount of entities from the entity list (defined in config) and kill them. Will be repeated for every tick until there are no entities left.
+            foreach (var p in entities)
+            {
+                // Cleanup the hotspot belonging to the node.
+                if (p is OreResourceEntity ore)
+                    ore.CleanupBonus();
+
+                if (p is IOEntity io)
+                    try { io.ClearConnections(); } catch { }
+
+                if (p != null && !p.IsDestroyed)
+                    p.Kill();
+
+                if (++entityIndex % _config.UndoBatchSize == 0)
+                    yield return CoroutineEx.waitForSeconds(_config.UndoBatchWait);
+            }
+
+            if (player != null)
             {
                 player.Reply(Lang("UNDO_SUCCESS", player.Id));
 
-                if (_lastPastes.ContainsKey(player.Id) && _lastPastes[player.Id].Count == 0)
+                if (_lastPastes.TryGetValue(player.Id, out var checkFrom) && checkFrom.Count == 0)
                     _lastPastes.Remove(player.Id);
             }
         }
@@ -1154,55 +1152,54 @@ namespace Oxide.Plugins
                 EnableSaving = enableSaving
             };
 
-            NextTick(() => PasteLoop(pasteData));
+            NextTick(() => pasteData.RunningCoroutine = ServerMgr.Instance.StartCoroutine(PasteLoop(pasteData)));
 
             return pasteData;
         }
 
-        private void PasteLoop(PasteData pasteData)
+        private IEnumerator PasteLoop(PasteData pasteData)
         {
             if (pasteData.Cancelled)
             {
-                UndoLoop(new HashSet<BaseEntity>(pasteData.PastedEntities), pasteData.Player,
-                    pasteData.PastedEntities.Count);
+                ServerMgr.Instance.StopCoroutine(pasteData.RunningCoroutine);
                 
-                return;
+                ServerMgr.Instance.StartCoroutine(UndoLoop(new(pasteData.PastedEntities), pasteData.Player));
+
+                yield break;
             }
 
-            var entities = pasteData.Entities;
-            var todo = entities.Take(_config.PasteBatchSize).ToArray();
+            int entityIndex = 0;
 
-            foreach (var data in todo)
+            foreach (var data in pasteData.Entities.ToList())
             {
-                entities.Remove(data);
+                pasteData.Entities.Remove(data);
 
                 PasteEntity(data, pasteData);
+
+                if (++entityIndex % _config.PasteBatchSize == 0)
+                    yield return CoroutineEx.waitForSeconds(_config.PasteBatchWait);
             }
 
-            if (entities.Count > 0)
-                NextTick(() => PasteLoop(pasteData));
-            else
+            foreach (var ioData in pasteData.EntityLookup.Values.ToArray())
             {
-                foreach (var ioData in pasteData.EntityLookup.Values.ToArray())
-                {
-                    ProgressIOEntity(ioData, pasteData);
-                }
+                ProgressIOEntity(ioData, pasteData);
+            }
 
-                foreach (var keyPair in pasteData.ItemsWithSubEntity)
-                {
-                    SetItemSubEntity(pasteData, keyPair.Value, keyPair.Key);
-                }
+            foreach (var keyPair in pasteData.ItemsWithSubEntity)
+            {
+                SetItemSubEntity(pasteData, keyPair.Value, keyPair.Key);
+            }
 
-                foreach (var entity in pasteData.StabilityEntities)
-                {
-                    entity.grounded = false;
-                    entity.InitializeSupports();
-                    entity.UpdateStability();
-                }
+            foreach (var entity in pasteData.StabilityEntities)
+            {
+                entity.grounded = false;
+                entity.InitializeSupports();
+                entity.UpdateStability();
+            }
 
                 foreach (var adapter in pasteData.industrialStorageAdaptors)
                 {
-                    if (adapter == null) { return; }
+                    if (adapter == null) { continue; }
                     if (!adapter.HasParent())
                     {
                         List<BaseEntity> ents = Facepunch.Pool.GetList<BaseEntity>();
@@ -1219,22 +1216,21 @@ namespace Oxide.Plugins
                     adapter.NotifyIndustrialNetworkChanged();
                 }
 
-                pasteData.FinalProcessingActions.ForEach(action => action());
+            pasteData.FinalProcessingActions.ForEach(action => action());
 
-                pasteData.Player.Reply(Lang("PASTE_SUCCESS", pasteData.Player.Id));
+            pasteData.Player.Reply(Lang("PASTE_SUCCESS", pasteData.Player.Id));
 #if DEBUG
-                pasteData.Player.Reply($"Stopwatch took: {pasteData.Sw.Elapsed.TotalMilliseconds} ms");
+            pasteData.Player.Reply($"Stopwatch took: {pasteData.Sw.Elapsed.TotalMilliseconds} ms");
 #endif
 
-                if (!_lastPastes.ContainsKey(pasteData.Player.Id))
-                    _lastPastes[pasteData.Player.Id] = new Stack<List<BaseEntity>>();
+            if (!_lastPastes.TryGetValue(pasteData.Player.Id, out var checkFrom))
+                _lastPastes[pasteData.Player.Id] = checkFrom = new();
 
-                _lastPastes[pasteData.Player.Id].Push(pasteData.PastedEntities);
+            checkFrom.Push(pasteData.PastedEntities);
 
-                pasteData.CallbackFinished?.Invoke();
+            pasteData.CallbackFinished?.Invoke();
 
-                Interface.CallHook("OnPasteFinished", pasteData.PastedEntities, pasteData.Filename, pasteData.Player, pasteData.StartPos);
-            }
+            Interface.CallHook("OnPasteFinished", pasteData.PastedEntities, pasteData.Filename, pasteData.Player, pasteData.StartPos);
         }
 
         private void PasteEntity(Dictionary<string, object> data, PasteData pasteData, BaseEntity parent = null)
@@ -3304,7 +3300,7 @@ namespace Oxide.Plugins
 
             var entities = new HashSet<BaseEntity>(_lastPastes[player.Id].Pop().ToList());
 
-            UndoLoop(entities, player);
+            ServerMgr.Instance.StartCoroutine(UndoLoop(entities, player));
         }
 
         //Replace between old ItemID to new ItemID
@@ -3999,6 +3995,7 @@ namespace Oxide.Plugins
             public bool Ownership;
             public bool CheckPlaced = true;
             public bool EnableSaving = true;
+            public Coroutine RunningCoroutine;
 
             public bool Cancelled = false;
 
