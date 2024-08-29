@@ -1202,7 +1202,7 @@ namespace Oxide.Plugins
 
                 foreach (var adapter in pasteData.industrialStorageAdaptors)
                 {
-                    if (adapter == null) { return; }
+                    if (adapter == null) { continue; }
                     if (!adapter.HasParent())
                     {
                         List<BaseEntity> ents = Facepunch.Pool.GetList<BaseEntity>();
