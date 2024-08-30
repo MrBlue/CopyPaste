@@ -2188,8 +2188,10 @@ namespace Oxide.Plugins
                 }
             }
 
-            ioEntity.MarkDirtyForceUpdateOutputs();
+            ioEntity.MarkDirty();
+            ioEntity.UpdateOutputs();
             ioEntity.SendNetworkUpdate();
+            ioEntity.RefreshIndustrialPreventBuilding();
         }
 
         private void SetItemSubEntity(PasteData pasteData, Item item, ulong oldId)
