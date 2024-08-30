@@ -2101,6 +2101,10 @@ namespace Oxide.Plugins
                         {
                             var ioOutput = ioEntity.outputs[index];
                             var ioEntity2 = ioConnection["entity"] as IOEntity;
+
+                            if (!ioEntity2.IsValid() || ioEntity2.IsDestroyed)
+                                continue;
+
                             var connectedToSlot = Convert.ToInt32( output["connectedToSlot"] );
                             var ioInput = ioEntity2.inputs[connectedToSlot];
 
