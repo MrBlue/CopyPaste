@@ -806,10 +806,13 @@ namespace Oxide.Plugins
                 ExtractHeadData(data, huntingTrophy.CurrentTrophyData);
             }
 
-            var pagerEntity = entity as PagerEntity;
-            if (pagerEntity != null)
+            // Save RF frequencies for non-IOEntity RF objects (IOEntity frequencies are handled separately)
+            var rfObject = entity as IRFObject;
+            if (rfObject != null && entity is not IOEntity)
             {
-                data.Add("frequency", pagerEntity.GetFrequency());
+                var frequency = rfObject.GetFrequency();
+                if (frequency > 0)
+                    data.Add("frequency", frequency);
             }
 
             var cassette = entity as Cassette;
@@ -1755,6 +1758,13 @@ namespace Oxide.Plugins
             {
                 pagerEntity.ChangeFrequency(Convert.ToInt32(data["frequency"]));
                 pagerEntity.SendNetworkUpdate();
+            }
+
+            var rfTimedExplosive = entity as RFTimedExplosive;
+            if (rfTimedExplosive != null && data.ContainsKey("frequency"))
+            {
+                rfTimedExplosive.SetFrequency(Convert.ToInt32(data["frequency"]));
+                rfTimedExplosive.SetFuse(0f);
             }
 
             var cassette = entity as Cassette;
