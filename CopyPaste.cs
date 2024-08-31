@@ -1383,6 +1383,15 @@ namespace Oxide.Plugins
                 entity.enableSaving = false;
             }
 
+            if (entity is ModularCar modularCar && data.TryGetValue("children", out var childrenObj))
+            {
+                // If there are children present, disable the default spawn settings to prevent stacking modules
+                // on top of each other, which could cause the vehicle to be destroyed
+                var children = childrenObj as List<object>;
+                if (children != null && children.Count > 0)
+                    modularCar.spawnSettings.useSpawnSettings = false;
+            }
+
             if (!entity.isSpawned)
                 entity.Spawn();
 
