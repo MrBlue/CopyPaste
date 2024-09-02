@@ -278,7 +278,11 @@ namespace Oxide.Plugins
             if (!Physics.Raycast(player.eyes.HeadRay(), out hit, 1000f, _rayCopy))
                 return Lang("NO_ENTITY_RAY", player.UserIDString);
 
-            return TryCopy(hit.point, hit.GetEntity().GetNetworkRotation().eulerAngles, filename,
+            var entity = hit.GetEntity();
+            if (!entity.IsValid())
+                return Lang("NO_ENTITY_RAY", player.UserIDString);
+
+            return TryCopy(hit.point, entity.GetNetworkRotation().eulerAngles, filename,
                 DegreeToRadian(player.GetNetworkRotation().eulerAngles.y), args, player.IPlayer, callback);
         }
 
