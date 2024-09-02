@@ -18,6 +18,10 @@ using ProtoBuf;
 using UnityEngine;
 using Graphics = System.Drawing.Graphics;
 
+#if DEBUG
+using System.Diagnostics;
+#endif
+
 // ReSharper disable SpecifyACultureInStringConversionExplicitly
 
 /*
