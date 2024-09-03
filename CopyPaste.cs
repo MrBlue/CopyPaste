@@ -396,6 +396,12 @@ namespace Oxide.Plugins
                         io.ClearConnections();
                     }
 
+                    var autoTurret = p as AutoTurret;
+                    if (autoTurret != null)
+                    {
+                        AutoTurret.interferenceUpdateList.Remove(autoTurret);
+                    }
+
                     if (p != null && !p.IsDestroyed)
                         p.Kill();
                 });
