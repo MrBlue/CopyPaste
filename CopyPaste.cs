@@ -1569,7 +1569,7 @@ namespace Oxide.Plugins
 
                 if (signData.ContainsKey("amount") || signData.ContainsKey("texture") || signData.ContainsKey("texture0"))
                 {
-                    int amount = int.TryParse(signData["amount"].ToString(), out var parsedAmount) ? parsedAmount : 1;
+                    int amount = signData.ContainsKey("amount") && int.TryParse(signData["amount"].ToString(), out var parsedAmount) ? parsedAmount : 1;
 
                     uint[] newTextureIDs = new uint[amount];
 
