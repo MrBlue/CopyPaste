@@ -1285,7 +1285,7 @@ namespace Oxide.Plugins
             Puts($"{nameof(PasteLoop)}: Entity {prefabname}");
 #endif
             
-            var skinid = ulong.Parse(data["skinid"].ToString());
+            var skinid = data.ContainsKey("skinid") ? ulong.Parse(data["skinid"].ToString()) : 0;
             var pos = isChild ? Vector3.zero : (Vector3)data["position"];
             var rot = isChild ? Quaternion.identity : (Quaternion)data["rotation"];
             var localPos = isChild ? (Vector3)data["position"] : Vector3.zero;
