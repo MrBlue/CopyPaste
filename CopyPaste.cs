@@ -2021,6 +2021,29 @@ namespace Oxide.Plugins
                 pasteData.industrialStorageAdaptors.Add(entity as IndustrialStorageAdaptor);
             }
 
+            var mixingTable = entity as MixingTable;
+            if (mixingTable != null && mixingTable.IsOn())
+            {
+                List<Item> orderedContainerItems = mixingTable.GetOrderedContainerItems(mixingTable.inventory, out var itemsAreContiguous);
+                mixingTable.currentRecipe = RecipeDictionary.GetMatchingRecipeAndQuantity(mixingTable.Recipes, orderedContainerItems, out var quantity);
+                mixingTable.currentQuantity = quantity;
+                if (mixingTable.currentRecipe == null || !itemsAreContiguous)
+                {
+                    mixingTable.StopMixing();
+                    return;
+                }
+                mixingTable.RemainingMixTime = mixingTable.currentRecipe.MixingDuration * mixingTable.currentQuantity;
+                mixingTable.TotalMixTime = mixingTable.RemainingMixTime;
+                if (mixingTable.RemainingMixTime == 0.0)
+                {
+                    mixingTable.ProduceItem(mixingTable.currentRecipe, mixingTable.currentQuantity);
+                }
+                else
+                {
+                    mixingTable.InvokeRepeating(mixingTable.TickMix, 1f, 1f);
+                }
+            }
+
             pasteData.PastedEntities.Add(entity);
             pasteData.CallbackSpawned?.Invoke(entity);
         }
