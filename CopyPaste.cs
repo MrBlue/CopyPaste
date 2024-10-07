@@ -31,15 +31,16 @@ using System.Diagnostics;
  * UIP88 - Turrets fix
  * bsdinis - Wire fix
  * nivex - Ownership option, sign fix
- * bmgjet - pattern firework, industrial
+ * bmgjet - Wallpapers, pattern firework, industrial
  * DezLife - CCTV fix
  * Wulf - Skipping 4.1.24 :D
+ * rostov114 - ComputerStation and WantedPoster :D
  * 
  */
 
 namespace Oxide.Plugins
 {
-    [Info("Copy Paste", "misticos", "4.2.0")]
+    [Info("Copy Paste", "misticos", "4.2.1")]
     [Description("Copy and paste buildings to save them or move them")]
     public class CopyPaste : CovalencePlugin
     {
@@ -688,6 +689,11 @@ namespace Oxide.Plugins
                 {
                     data.Add("customColour", buildingblock.customColour);
                 }
+                if (buildingblock.HasWallpaper())
+                {
+                    data.Add("wallpaperID", buildingblock.wallpaperID);
+                    data.Add("wallpaperHealth", buildingblock.wallpaperHealth);
+                }
             }
 
             var container = entity as IItemContainerEntity;
@@ -805,6 +811,22 @@ namespace Oxide.Plugins
                     { "yaw", cctvRc.yawAmount },
                     { "pitch", cctvRc.pitchAmount },
                     { "rcIdentifier", cctvRc.rcIdentifier }
+                });
+            }
+
+            var computerStation = entity as ComputerStation;
+            if (computerStation != null)
+            {
+                data.Add("bookmarks", computerStation.GenerateControlBookmarkString());
+            }
+
+            var wantedPoster = entity as WantedPoster;
+            if (wantedPoster != null)
+            {
+                data.Add("wantedPoster", new Dictionary<string, object>
+                {
+                    { "playerId", wantedPoster.playerId },
+                    { "playerName", wantedPoster.playerName }
                 });
             }
 
@@ -983,6 +1005,23 @@ namespace Oxide.Plugins
                 {
                     ioData.Add("industrialconveyormode", (int)conveyor.mode);
                     ioData.Add("industrialconveyorfilteritems", SerializeConveyorFilter(conveyor.filterItems));
+                }
+
+                var digitalClock = ioEntity as DigitalClock;
+                if (digitalClock != null)
+                {
+                    var alarms = new List<object>();
+                    foreach (var alarm in digitalClock.alarms)
+                    {
+                        alarms.Add(new Dictionary<string, object>
+                        {
+                            { "time", alarm.time },
+                            { "active", alarm.active },
+                        });
+                    }
+
+                    ioData.Add("muted", digitalClock.muted);
+                    ioData.Add("alarms", alarms);
                 }
 
                 data.Add("IOEntity", ioData);
@@ -1425,6 +1464,14 @@ namespace Oxide.Plugins
                 object customColour;
                 if (data.TryGetValue("customColour", out customColour))
                     buildingBlock.SetCustomColour(Convert.ToUInt32(customColour));
+
+                object wallpaperHealth;
+                if (data.TryGetValue("wallpaperHealth", out wallpaperHealth))
+                    buildingBlock.wallpaperHealth = Convert.ToInt32(wallpaperHealth);
+
+                object wallpaperID;
+                if (data.TryGetValue("wallpaperID", out wallpaperID))
+                    buildingBlock.SetWallpaper(Convert.ToUInt64(wallpaperID));
             }
             else if (baseCombat != null)
                 baseCombat.SetHealth(baseCombat.MaxHealth());
@@ -1761,6 +1808,28 @@ namespace Oxide.Plugins
                 cctvRc.SendNetworkUpdate();
             }
 
+            var computerStation = entity as ComputerStation;
+            if (computerStation != null && data.ContainsKey("bookmarks"))
+            {
+                var bookmarks = data["bookmarks"] as string;
+                foreach (string text in bookmarks.Split(ComputerStation.BookmarkSplit, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (ComputerStation.IsValidIdentifier(text))
+                    {
+                        computerStation.controlBookmarks.Add(text);
+                    }
+                }
+            }
+
+            var wantedPoster = entity as WantedPoster;
+            if (wantedPoster != null && data.ContainsKey("wantedPoster"))
+            {
+                var poster = (Dictionary<string, object>)data["wantedPoster"];
+                wantedPoster.playerId = Convert.ToUInt64(poster["playerId"]);
+                wantedPoster.playerName = poster["playerName"].ToString();
+                wantedPoster.SendNetworkUpdate();
+            }
+
             var headEntity = entity as HeadEntity;
             if (headEntity != null && data.ContainsKey("currentTrophyData"))
             {
@@ -2082,6 +2151,30 @@ namespace Oxide.Plugins
 
                 conveyor.filterItems = DeSerializeConveyorFilter(ioData["industrialconveyorfilteritems"].ToString());
                 conveyor.SendNetworkUpdate();
+            }
+
+            var digitalClock = ioEntity as DigitalClock;
+            if (digitalClock != null)
+            {
+                if (ioData.ContainsKey("muted"))
+                {
+                    digitalClock.muted = Convert.ToBoolean(ioData["muted"]);
+                }
+
+                if (ioData.ContainsKey("alarms") && ioData["alarms"] is List<object> alarms)
+                {
+                    foreach (Dictionary<string, object> alarm in alarms)
+                    {
+                        if (alarm != null && alarm.ContainsKey("time") && alarm.ContainsKey("active"))
+                        {
+                            digitalClock.alarms.Add(new DigitalClock.Alarm(TimeSpan.Parse(alarm["time"].ToString()),
+                                Convert.ToBoolean(alarm["active"])));
+                        }
+                    }
+                }
+
+                digitalClock.MarkDirty();
+                digitalClock.SendNetworkUpdate();
             }
 
             if (inputs != null && inputs.Count > 0)
