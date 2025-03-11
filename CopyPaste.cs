@@ -914,6 +914,14 @@ namespace Oxide.Plugins
                 });
             }
 
+            var ridableHorse2 = entity as RidableHorse2;
+            if (ridableHorse2 != null)
+            {
+                data.Add("currentBreedIndex", ridableHorse2.currentBreedIndex);
+                if (ridableHorse2.IsTowing && ridableHorse2.towingEntityId.IsValid)
+                    data.Add("towingEntityId", ridableHorse2.towingEntityId.Value);
+            }
+
             var ioEntity = entity as IOEntity;
 
             if (ioEntity.IsValid() && !ioEntity.IsDestroyed)
@@ -1010,7 +1018,7 @@ namespace Oxide.Plugins
                 data.Add("IOEntity", ioData);
             }
 
-            if (entity is StorageContainer || entity is Door || (isChild && entity is not IOEntity))
+            if (entity is StorageContainer || entity is Door || entity is ITowing || (isChild && entity is not IOEntity))
             {
                 data.Add("oldID", entity.net.ID.Value);
             }
@@ -1936,6 +1944,33 @@ namespace Oxide.Plugins
                 }
 
                 vendingMachine.FullUpdate();
+            }
+
+            var ridableHorse2 = entity as RidableHorse2;
+            if (ridableHorse2 != null)
+            {
+                if (data.TryGetValue("currentBreedIndex", out var currentBreedIndexObj))
+                    ridableHorse2.SetBreed(Convert.ToInt32(currentBreedIndexObj));
+
+                if (data.TryGetValue("towingEntityId", out var towingEntityIdObj))
+                {
+                    // Try to find the ITowing entity after everything has pasted
+                    pasteData.FinalProcessingActions.Add(() =>
+                    {
+                        if (pasteData.EntityLookup.TryGetValue(Convert.ToUInt64(towingEntityIdObj), out var result) &&
+                            result.TryGetValue("entity", out var newEntityObj))
+                        {
+                            if (newEntityObj is BaseEntity newEntity && newEntity.IsValid() && !newEntity.IsDestroyed &&
+                                newEntity is ITowing iTowing)
+                            {
+                                newEntity.SetFlag(BaseEntity.Flags.Reserved14, false);
+                                ridableHorse2.towingEntityId = newEntity.net.ID;
+                                ridableHorse2.towableEntity = iTowing;
+                                ridableHorse2.TowAttach();
+                            }
+                        }
+                    });
+                }
             }
 
             var ioEntity = entity as IOEntity;
