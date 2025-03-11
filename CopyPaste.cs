@@ -813,6 +813,22 @@ namespace Oxide.Plugins
                 });
             }
 
+            var computerStation = entity as ComputerStation;
+            if (computerStation != null)
+            {
+                data.Add("bookmarks", computerStation.GenerateControlBookmarkString());
+            }
+
+            var wantedPoster = entity as WantedPoster;
+            if (wantedPoster != null)
+            {
+                data.Add("wantedPoster", new Dictionary<string, object>
+                {
+                    { "playerId", wantedPoster.playerId },
+                    { "playerName", wantedPoster.playerName }
+                });
+            }
+
             var headEntity = entity as HeadEntity;
             if (headEntity != null)
             {
@@ -1789,6 +1805,28 @@ namespace Oxide.Plugins
                 cctvRc.pitchAmount = Convert.ToSingle(cctv["pitch"]);
                 cctvRc.rcIdentifier = cctv["rcIdentifier"].ToString();
                 cctvRc.SendNetworkUpdate();
+            }
+
+            var computerStation = entity as ComputerStation;
+            if (computerStation != null && data.ContainsKey("bookmarks"))
+            {
+                var bookmarks = data["bookmarks"] as string;
+                foreach (string text in bookmarks.Split(ComputerStation.BookmarkSplit, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (ComputerStation.IsValidIdentifier(text))
+                    {
+                        computerStation.controlBookmarks.Add(text);
+                    }
+                }
+            }
+
+            var wantedPoster = entity as WantedPoster;
+            if (wantedPoster != null && data.ContainsKey("wantedPoster"))
+            {
+                var poster = (Dictionary<string, object>)data["wantedPoster"];
+                wantedPoster.playerId = Convert.ToUInt64(poster["playerId"]);
+                wantedPoster.playerName = poster["playerName"].ToString();
+                wantedPoster.SendNetworkUpdate();
             }
 
             var headEntity = entity as HeadEntity;
