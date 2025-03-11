@@ -992,6 +992,13 @@ namespace Oxide.Plugins
                 }
             }
 
+            var constructableEntity = entity as ConstructableEntity;
+            if (constructableEntity != null && constructableEntity.currentMaterials.Length > 0)
+            {
+                data.Add("currentMaterials", constructableEntity.currentMaterials.ToArray());
+                data.Add("health", constructableEntity.Health());
+            }
+
             var ioEntity = entity as IOEntity;
 
             if (ioEntity.IsValid() && !ioEntity.IsDestroyed)
@@ -2298,6 +2305,26 @@ namespace Oxide.Plugins
                         }
                     });
                 }
+            }
+
+            var constructableEntity = entity as ConstructableEntity;
+            if (constructableEntity != null)
+            {
+                if (data.TryGetValue("currentMaterials", out var currentMaterialsObj))
+                {
+                    var currentMaterials = currentMaterialsObj as List<object>;
+                    if (currentMaterials != null)
+                    {
+                        for (var i = 0; i < currentMaterials.Count; i++)
+                            constructableEntity.currentMaterials[i] = Convert.ToInt32(currentMaterials[i]);
+                    }
+                }
+
+                if (data.TryGetValue("health", out var health))
+                    constructableEntity.SetHealth(Mathf.Min(Convert.ToSingle(health), constructableEntity.MaxHealth()));
+
+                constructableEntity.SendNetworkUpdate();
+                constructableEntity.UpdateState();
             }
 
             var ioEntity = entity as IOEntity;
