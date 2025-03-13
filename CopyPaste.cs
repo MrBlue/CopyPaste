@@ -471,6 +471,24 @@ namespace Oxide.Plugins
             var buildingId = copyData.BuildingId;
             var copyMechanics = copyData.CopyMechanics;
             var batchSize = checkFrom.Count < _config.CopyBatchSize ? checkFrom.Count : _config.CopyBatchSize;
+            var range = copyData.Range;
+
+            /*
+                BUILDING BLOCK DETECTION FIX:
+                Rust building blocks (foundations, walls, etc.) are 3m x 3m. When the plugin's detection range is
+                exactly 3.0f (default) and starting from one building block, Vis.Entities() detection extends precisely
+                to the edge of adjacent blocks but doesn't cross their boundaries.
+
+                This creates an edge case where connected building blocks aren't always detected (depending on the
+                block's grade and or skin) when there are no deployables positioned such that they would fall within 3m
+                range of adjacent building blocks (which would otherwise cause those blocks to be detected).
+
+                By adding a tiny amount (0.001f) to the range when it's exactly 3.0f, we ensure Vis.Entities() detection
+                slightly overlaps adjacent blocks, properly capturing the entire connected structure without
+                significantly changing the intended detection range.
+            */
+            if (range == 3.0f)
+                range += 0.001f;
 
             for (var i = 0; i < batchSize; i++)
             {
@@ -480,7 +498,7 @@ namespace Oxide.Plugins
                 var list = Pool.Get<List<BaseEntity>>();
                 try
                 {
-                    Vis.Entities(checkFrom.Pop(), copyData.Range, list, copyData.CurrentLayer);
+                    Vis.Entities(checkFrom.Pop(), range, list, copyData.CurrentLayer);
 
                     foreach (var entity in list)
                     {
