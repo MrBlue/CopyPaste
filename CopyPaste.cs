@@ -385,6 +385,9 @@ namespace Oxide.Plugins
 
         private void RemoveEntity(BaseEntity entity)
         {
+            if (!entity.IsValid() || entity.IsDestroyed)
+                return;
+
             // Cleanup the hotspot beloning to the node.
             var ore = entity as OreResourceEntity;
             if (ore != null)
@@ -404,8 +407,7 @@ namespace Oxide.Plugins
                 AutoTurret.interferenceUpdateList.Remove(autoTurret);
             }
 
-            if (entity != null && !entity.IsDestroyed)
-                entity.Kill();
+            entity.Kill();
         }
 
         private void UndoLoop(HashSet<BaseEntity> entities, IPlayer player, int count = 0)
