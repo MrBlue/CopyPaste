@@ -962,21 +962,45 @@ namespace Oxide.Plugins
                 ExtractTextures(data, paintedItemStorageEntity.GetContentCRCs, entity, FileStorage.Type.png);
             }
 
-            var lights = entity as AdvancedChristmasLights;
+            var lights = entity as ChristmasLights;
             if (lights != null)
             {
+                data.Add("animationStyle", lights.animationStyle);
+            }
+
+            var stringLights = entity as StringLights;
+            if (stringLights != null)
+            {
                 var lightsPointsList = new List<Dictionary<string, object>>();
-                foreach (var lightsPoint in lights.points)
+                foreach (var pointEntry in stringLights.points)
                 {
                     lightsPointsList.Add(new Dictionary<string, object>
                     {
-                        { "normal", lightsPoint.normal },
-                        { "point", NormalizePosition(copyData.SourcePos, lightsPoint.point, copyData.RotCor) },
-                        { "slack", lightsPoint.slack },
+                        { "normal", pointEntry.normal },
+                        { "point", NormalizePosition(copyData.SourcePos, pointEntry.point, copyData.RotCor) },
+                        { "slack", pointEntry.slack },
                     });
                 }
                 data.Add("points", lightsPointsList);
-                data.Add("animationStyle", lights.animationStyle);
+            }
+
+            var chandelier = entity as Chandelier;
+            if (chandelier != null)
+            {
+                data.Add("chandelierLength", chandelier.ChandelierLength);
+            }
+
+            var orientableLight = entity as OrientableLight;
+            if (orientableLight != null)
+            {
+                data.Add("pitchAmount", orientableLight.pitchAmount);
+                data.Add("yawAmount", orientableLight.yawAmount);
+            }
+
+            var mannequin = entity as Mannequin;
+            if (mannequin != null)
+            {
+                data.Add("poseIndex", mannequin.PoseIndex);
             }
 
             if (copyData.SaveShare)
@@ -1592,7 +1616,7 @@ namespace Oxide.Plugins
                         Facepunch.Pool.FreeUnmanaged(ref ents);
                     }
                     adapter.MarkDirtyForceUpdateOutputs();
-                    adapter.SendNetworkUpdateImmediate(false);
+                    adapter.SendNetworkUpdateImmediate();
                     adapter.RefreshIndustrialPreventBuilding();
                     adapter.NotifyIndustrialNetworkChanged();
                 }
@@ -2291,8 +2315,17 @@ namespace Oxide.Plugins
                 }
             }
 
-            var lights = entity as AdvancedChristmasLights;
+            var lights = entity as ChristmasLights;
             if (lights != null)
+            {
+                if (data.ContainsKey("animationStyle"))
+                {
+                    lights.animationStyle = (ChristmasLights.AnimationType)data["animationStyle"];
+                }
+            }
+
+            var stringLights = entity as StringLights;
+            if (stringLights != null)
             {
                 if (data.ContainsKey("points"))
                 {
@@ -2314,19 +2347,47 @@ namespace Oxide.Plugins
                             if (pointEntry.TryGetValue("slack", out var rawSlack))
                                 slack = Convert.ToSingle(rawSlack);
 
-                            lights.points.Add(new AdvancedChristmasLights.pointEntry
+                            stringLights.points.Add(new StringLights.PointEntry
                             {
-                                normal = new Vector3(Convert.ToSingle(normal["x"]), Convert.ToSingle(normal["y"]), Convert.ToSingle(normal["z"])),
+                                normal = new Vector3(Convert.ToSingle(normal["x"]), Convert.ToSingle(normal["y"]),
+                                    Convert.ToSingle(normal["z"])),
                                 point = adjustedPoint,
                                 slack = slack
                             });
                         }
                     }
                 }
+            }
 
-                if (data.ContainsKey("animationStyle"))
+            var chandelier = entity as Chandelier;
+            if (chandelier != null)
+            {
+                if (data.ContainsKey("chandelierLength"))
                 {
-                    lights.animationStyle = (AdvancedChristmasLights.AnimationType)data["animationStyle"];
+                    chandelier.SetChandelierLength(Convert.ToSingle(data["chandelierLength"]));
+                }
+            }
+
+            var orientableLight = entity as OrientableLight;
+            if (orientableLight != null)
+            {
+                if (data.ContainsKey("pitchAmount"))
+                {
+                    orientableLight.pitchAmount = Convert.ToSingle(data["pitchAmount"]);
+                }
+
+                if (data.ContainsKey("yawAmount"))
+                {
+                    orientableLight.yawAmount = Convert.ToSingle(data["yawAmount"]);
+                }
+            }
+
+            var mannequin = entity as Mannequin;
+            if (mannequin != null)
+            {
+                if (data.ContainsKey("poseIndex"))
+                {
+                    mannequin.PoseIndex = Convert.ToInt32(data["poseIndex"]);
                 }
             }
 
