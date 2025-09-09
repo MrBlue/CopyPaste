@@ -17,6 +17,7 @@ using Oxide.Game.Rust.Libraries.Covalence;
 using ProtoBuf;
 using UnityEngine;
 using Graphics = System.Drawing.Graphics;
+using WrapMode = System.Drawing.Drawing2D.WrapMode;
 
 #if DEBUG
 using System.Diagnostics;
@@ -75,7 +76,9 @@ namespace Oxide.Plugins
 
         private Dictionary<string, SignSize> _signSizes = new Dictionary<string, SignSize>
         {
-            //{"spinner.wheel.deployed", new SignSize(512, 512)},
+            { "photoframe.landscape", new SignSize(320, 240) },
+            { "photoframe.large", new SignSize(320, 240) },
+            { "photoframe.portrait", new SignSize(320, 240) },
             { "sign.pictureframe.landscape", new SignSize(256, 192) },
             { "sign.pictureframe.tall", new SignSize(128, 512) },
             { "sign.pictureframe.portrait", new SignSize(205, 256) },
@@ -1467,18 +1470,48 @@ namespace Oxide.Plugins
             return player.IsAdmin || player.HasPermission(permName);
         }
 
+        private static bool IsPNG(byte[] imageBytes)
+        {
+            return imageBytes is { Length: >= 8 } &&
+                   imageBytes[0] == 0x89 && imageBytes[1] == 0x50 &&
+                   imageBytes[2] == 0x4E && imageBytes[3] == 0x47 &&
+                   imageBytes[4] == 0x0D && imageBytes[5] == 0x0A &&
+                   imageBytes[6] == 0x1A && imageBytes[7] == 0x0A;
+        }
+
         private byte[] ImageResize(byte[] imageBytes, int width, int height)
         {
-            Bitmap resizedImage = new Bitmap(width, height),
-                sourceImage = new Bitmap(new MemoryStream(imageBytes));
+            if (imageBytes == null || imageBytes.Length == 0 || width <= 0 || height <= 0)
+                return imageBytes;
 
-            Graphics.FromImage(resizedImage).DrawImage(sourceImage, new Rectangle(0, 0, width, height),
-                new Rectangle(0, 0, sourceImage.Width, sourceImage.Height), GraphicsUnit.Pixel);
+            var sourceStream = new MemoryStream(imageBytes, writable: false);
+            using var src = new Bitmap(sourceStream);
 
-            var ms = new MemoryStream();
-            resizedImage.Save(ms, ImageFormat.Png);
+            var output = new MemoryStream();
+            if (src.Width == width && src.Height == height)
+            {
+                if (IsPNG(imageBytes))
+                    return imageBytes;
 
-            return ms.ToArray();
+                src.Save(output, ImageFormat.Png);
+            }
+            else
+            {
+                using var dest = new Bitmap(width, height, PixelFormat.Format24bppRgb);
+                dest.SetResolution(src.HorizontalResolution, src.VerticalResolution);
+
+                using var wrap = new ImageAttributes();
+                wrap.SetWrapMode(WrapMode.TileFlipXY);
+
+                var destRect = new Rectangle(0, 0, width, height);
+
+                using var g = Graphics.FromImage(dest);
+                g.DrawImage(src, destRect, 0, 0, src.Width, src.Height, GraphicsUnit.Pixel, wrap);
+
+                dest.Save(output, ImageFormat.Png);
+            }
+
+            return output.ToArray();
         }
 
         private string Lang(string key, string userId = null, params object[] args) =>
