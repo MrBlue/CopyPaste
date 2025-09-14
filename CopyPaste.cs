@@ -2068,22 +2068,36 @@ namespace Oxide.Plugins
                     if (data.TryGetValue(idKey, out rawValue))
                     {
                         ulong wallpaperId = Convert.ToUInt64(rawValue);
-                        float rotation = 0f;
+                        if (wallpaperId == 0UL)
+                            continue;
 
-                        string rotationKey = side == 0 ? "wallpaperRotation" : "wallpaperRotation2";
+                        int currentSide = side;
+                        float rotation = 0f;
+                        float health = BuildingBlock.WALLPAPER_MAXHEALTH;
+
+                        string rotationKey = currentSide == 0 ? "wallpaperRotation" : "wallpaperRotation2";
                         if (data.TryGetValue(rotationKey, out rawValue))
                             rotation = Convert.ToSingle(rawValue);
 
-                        buildingBlock.SetWallpaper(wallpaperId, side, rotation);
-
-                        string healthKey = side == 0 ? "wallpaperHealth" : "wallpaperHealth2";
+                        string healthKey = currentSide == 0 ? "wallpaperHealth" : "wallpaperHealth2";
                         if (data.TryGetValue(healthKey, out rawValue))
+                            health = Convert.ToSingle(rawValue);
+
+                        // Defer wallpaper until all building blocks are pasted.
+                        // Interior wallpaper (side 1) must be "inside" (fully enclosed)
+                        // or it will despawn on the next stability tick
+                        pasteData.FinalProcessingActions.Add(() =>
                         {
-                            if (side == 0)
-                                buildingBlock.wallpaperHealth = Convert.ToSingle(rawValue);
+                            if (buildingBlock == null || !buildingBlock.IsValid() || buildingBlock.IsDestroyed)
+                                return;
+
+                            buildingBlock.SetWallpaper(wallpaperId, currentSide, rotation);
+
+                            if (currentSide == 0)
+                                buildingBlock.wallpaperHealth = health;
                             else
-                                buildingBlock.wallpaperHealth2 = Convert.ToSingle(rawValue);
-                        }
+                                buildingBlock.wallpaperHealth2 = health;
+                        });
                     }
                 }
             }
