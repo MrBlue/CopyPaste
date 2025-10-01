@@ -2397,7 +2397,13 @@ namespace Oxide.Plugins
                 var bagData = data["sleepingbag"] as Dictionary<string, object>;
 
                 sleepingBag.niceName = bagData["niceName"].ToString();
-                sleepingBag.deployerUserID = ulong.Parse(bagData["deployerUserID"].ToString());
+                var deployerUserID = ulong.Parse(bagData["deployerUserID"].ToString());
+                if (sleepingBag.deployerUserID != deployerUserID)
+                {
+                    var oldUser = sleepingBag.deployerUserID;
+                    sleepingBag.deployerUserID = deployerUserID;
+                    SleepingBag.OnBagChangedOwnership(sleepingBag, oldUser);
+                }
                 sleepingBag.SetPublic(Convert.ToBoolean(bagData["isPublic"]));
             }
 
