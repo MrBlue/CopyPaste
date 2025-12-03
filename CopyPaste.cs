@@ -1006,6 +1006,14 @@ namespace Oxide.Plugins
                 data.Add("poseIndex", mannequin.PoseIndex);
             }
 
+            var partyBalloon = entity as PartyBalloon;
+            if (partyBalloon != null)
+            {
+                data.Add("balloonText", partyBalloon.BalloonText);
+                data.Add("balloonColour", SerializeUnityEngineColor(partyBalloon.BalloonColour));
+                data.Add("textColour", SerializeUnityEngineColor(partyBalloon.TextColour));
+            }
+
             if (copyData.SaveShare)
             {
                 var sleepingBag = entity as SleepingBag;
@@ -2432,6 +2440,24 @@ namespace Oxide.Plugins
                 {
                     mannequin.PoseIndex = Convert.ToInt32(data["poseIndex"]);
                 }
+            }
+
+            var partyBalloon = entity as PartyBalloon;
+            if (partyBalloon != null)
+            {
+                object value;
+                if (data.TryGetValue("balloonText", out value))
+                {
+                    var balloonText = value.ToString();
+                    if (!String.IsNullOrEmpty(balloonText))
+                        partyBalloon.BalloonText = balloonText;
+                }
+
+                if (data.TryGetValue("balloonColour", out value))
+                    partyBalloon.BalloonColour = DeserializeUnityEngineColor(value);
+
+                if (data.TryGetValue("textColour", out value))
+                    partyBalloon.TextColour = DeserializeUnityEngineColor(value);
             }
 
             var sleepingBag = entity as SleepingBag;
@@ -4374,6 +4400,36 @@ namespace Oxide.Plugins
                 return Convert.ToBase64String(Facepunch.Utility.Compression.Compress(Encoding.ASCII.GetBytes(starstring)));
             }
             return starstring;
+        }
+
+        private Dictionary<string, object> SerializeUnityEngineColor(UnityEngine.Color color)
+        {
+            return new Dictionary<string, object>
+            {
+                { "r", color.r.ToString() },
+                { "g", color.g.ToString() },
+                { "b", color.b.ToString() },
+                { "a", color.a.ToString() },
+            };
+        }
+
+        private UnityEngine.Color DeserializeUnityEngineColor(object rawData)
+        {
+            if (rawData == null)
+                return UnityEngine.Color.white;
+
+            var data = rawData as Dictionary<string, object>;
+
+            if (data == null)
+                return UnityEngine.Color.white;
+
+            object val;
+            float r = data.TryGetValue("r", out val) && val != null ? Convert.ToSingle(val) : 1f;
+            float g = data.TryGetValue("g", out val) && val != null ? Convert.ToSingle(val) : 1f;
+            float b = data.TryGetValue("b", out val) && val != null ? Convert.ToSingle(val) : 1f;
+            float a = data.TryGetValue("a", out val) && val != null ? Convert.ToSingle(val) : 1f;
+
+            return new UnityEngine.Color(r, g, b, a);
         }
 
         private object TryPasteBack(string filename, IPlayer player, string[] args)
