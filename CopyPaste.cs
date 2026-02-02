@@ -965,6 +965,17 @@ namespace Oxide.Plugins
                 ExtractTextures(data, paintedItemStorageEntity.GetContentCRCs, entity, FileStorage.Type.png);
             }
 
+            var shutterFrame = entity as ShutterFrame;
+            if (shutterFrame != null)
+                data.Add("isShutterOpen", shutterFrame.IsShutterOpen);
+
+            var ornateFrame = entity as OrnateFrame;
+            if (ornateFrame != null)
+            {
+                data.Add("frameText", ornateFrame.FrameText);
+                data.Add("textColour", SerializeUnityEngineColor(ornateFrame.TextColour));
+            }
+
             var lights = entity as ChristmasLights;
             if (lights != null)
             {
@@ -2001,12 +2012,18 @@ namespace Oxide.Plugins
                         entity.SetParent(parent);
 
                     // Skip OnDeployed() for entities that don't properly handle null "deployedBy" or "fromItem.info"
-                    if (entity is not CustomDoorManipulator && entity is not AutoTurret &&
-                        entity is not GrowableEntity && entity is not Signage)
+                    if (entity is Signage signage)
+                    {
+                        signage.AddToEasel(parent);
+                    }
+                    else if (entity is PhotoFrame photo)
+                    {
+                        photo.AddToEasel(parent);
+                    }
+                    else if (entity is not CustomDoorManipulator and not AutoTurret and not GrowableEntity)
                     {
                         entity.OnDeployed(parent, null, _emptyItem);
                     }
-
 
                     transform.localPosition = localPos;
                     transform.localRotation = localRot;
@@ -2364,6 +2381,28 @@ namespace Oxide.Plugins
                         }
                     }
                 }
+            }
+
+            var shutterFrame = entity as ShutterFrame;
+            if (shutterFrame != null)
+            {
+                if (data.TryGetValue("isShutterOpen", out object value))
+                    shutterFrame.IsShutterOpen = Convert.ToBoolean(value);
+            }
+
+            var ornateFrame = entity as OrnateFrame;
+            if (ornateFrame != null)
+            {
+                object value;
+                if (data.TryGetValue("frameText", out value))
+                {
+                    var frameText = value.ToString();
+                    if (!String.IsNullOrEmpty(frameText))
+                        ornateFrame.FrameText = frameText;
+                }
+
+                if (data.TryGetValue("textColour", out value))
+                    ornateFrame.TextColour = DeserializeUnityEngineColor(value);
             }
 
             var lights = entity as ChristmasLights;
