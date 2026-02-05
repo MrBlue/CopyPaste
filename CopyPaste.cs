@@ -51,9 +51,10 @@ namespace Oxide.Plugins
 
         private int _copyLayer =
                 LayerMask.GetMask("Construction", "Prevent Building", "Construction Trigger", "Trigger", "Deployed",
-                    "Default", "Ragdoll"),
+                    "Default", "Ragdoll", "Vehicle Large"),
             _groundLayer = LayerMask.GetMask("Terrain", "Default"),
-            _rayCopy = LayerMask.GetMask("Construction", "Deployed", "Tree", "Resource", "Prevent Building"),
+            _rayCopy = LayerMask.GetMask("Construction", "Deployed", "Tree", "Resource", "Prevent Building",
+                "Vehicle Large"),
             _rayPaste = LayerMask.GetMask("Construction", "Deployed", "Tree", "Terrain", "World", "Water",
                 "Prevent Building");
 
@@ -864,9 +865,9 @@ namespace Oxide.Plugins
                 var children = new List<object>();
                 foreach (var child in entity.children)
                 {
-                    if (!child.IsValid())
+                    if (!child.IsValid() || child is BasePlayer)
                         continue;
-                    
+
                     children.Add(EntityData(child, child.transform.position, child.transform.rotation.eulerAngles, copyData));
                 }
 
@@ -1037,6 +1038,23 @@ namespace Oxide.Plugins
                 data.Add("textColour", SerializeUnityEngineColor(partyBalloon.TextColour));
             }
 
+            var playerBoat = entity as PlayerBoat;
+            if (playerBoat != null)
+            {
+                data.Add("lastEditLocalPos", new Dictionary<string, object>
+                {
+                    { "x", playerBoat.lastEditLocalPos.x.ToString() },
+                    { "y", playerBoat.lastEditLocalPos.y.ToString() },
+                    { "z", playerBoat.lastEditLocalPos.z.ToString() }
+                });
+                data.Add("lastEditLocalRot", new Dictionary<string, object>
+                {
+                    { "x", playerBoat.lastEditLocalRot.x.ToString() },
+                    { "y", playerBoat.lastEditLocalRot.y.ToString() },
+                    { "z", playerBoat.lastEditLocalRot.z.ToString() }
+                });
+            }
+
             if (copyData.SaveShare)
             {
                 var sleepingBag = entity as SleepingBag;
@@ -1069,6 +1087,20 @@ namespace Oxide.Plugins
                     {
                         { "authorizedPlayers", autoTurret.authorizedPlayers.ToList() }
                     });
+                }
+
+                var steeringWheel = entity as SteeringWheel;
+                if (steeringWheel != null && steeringWheel.Privilege != null)
+                {
+                    var dict = new Dictionary<string, object>
+                    {
+                        { "authorizedPlayers", steeringWheel.Privilege.authorizedPlayers.ToList() }
+                    };
+
+                    if (steeringWheel.BoatLock != null && steeringWheel.BoatLock.HasALock)
+                        dict["code"] = steeringWheel.BoatLock.Code;
+
+                    data.Add("steeringWheel", dict);
                 }
             }
 
@@ -2017,11 +2049,35 @@ namespace Oxide.Plugins
             {
                 if (!entity.isSpawned)
                 {
-                    entity.gameObject.Identity();
-                    if (data.ContainsKey("parentbone"))
-                        entity.SetParent(parent, data["parentbone"].ToString());
+                    var playerBoat = parent as PlayerBoat;
+                    bool needsNormalParenting = entity is DroppedItem;
+                    bool playerBotEntity = playerBoat != null && !needsNormalParenting;
+
+                    if (playerBotEntity)
+                    {
+                        if (!pasteData.playerBoats.ContainsKey(playerBoat))
+                            pasteData.playerBoats[playerBoat] = new();
+
+                        var playerBoatData = pasteData.playerBoats[playerBoat];
+
+                        transform.position = playerBoat.transform.TransformPoint(localPos);
+                        transform.rotation = playerBoat.transform.rotation * localRot;
+
+                        if (entity is BoatBuildingBlock boatBuildingBlock)
+                            playerBoatData.blocks.Add(boatBuildingBlock);
+                        else
+                        {
+                            playerBoatData.deployables.Add(entity);
+                        }
+                    }
                     else
-                        entity.SetParent(parent);
+                    {
+                        entity.gameObject.Identity();
+                        if (data.ContainsKey("parentbone"))
+                            entity.SetParent(parent, data["parentbone"].ToString());
+                        else
+                            entity.SetParent(parent);
+                    }
 
                     // Skip OnDeployed() for entities that don't properly handle null "deployedBy" or "fromItem.info"
                     if (entity is Signage signage)
@@ -2032,13 +2088,21 @@ namespace Oxide.Plugins
                     {
                         photo.AddToEasel(parent);
                     }
-                    else if (entity is not CustomDoorManipulator and not AutoTurret and not GrowableEntity)
+                    else if (!playerBotEntity && entity is not (CustomDoorManipulator
+                        or AutoTurret
+                        or GrowableEntity
+                        or Signage
+                        or BoatBuildingBlock))
                     {
                         entity.OnDeployed(parent, null, _emptyItem);
                     }
 
-                    transform.localPosition = localPos;
-                    transform.localRotation = localRot;
+                    // Set local position/rotation for entities that were parented normally
+                    if (playerBoat == null || needsNormalParenting)
+                    {
+                        transform.localPosition = localPos;
+                        transform.localRotation = localRot;
+                    }
                 }
             }
             // If the entity is not a child, set the position and rotation.
@@ -2523,6 +2587,20 @@ namespace Oxide.Plugins
                     partyBalloon.TextColour = DeserializeUnityEngineColor(value);
             }
 
+            var boatBuildingStation = entity as BoatBuildingStation;
+            if (boatBuildingStation != null)
+            {
+                if (pasteData.Ownership && entity.OwnerID.IsSteamId())
+                {
+                    boatBuildingStation.bbsOwnerID = entity.OwnerID;
+                    boatBuildingStation.AddToBBSList(entity.OwnerID);
+                }
+
+                boatBuildingStation.Netting.gameObject.SetActive(false);
+                boatBuildingStation.SetFlag(BaseEntity.Flags.On, false);
+                boatBuildingStation.StopAutoCloseInvoke();
+            }
+
             var sleepingBag = entity as SleepingBag;
             if (sleepingBag != null && data.ContainsKey("sleepingbag"))
             {
@@ -2564,6 +2642,27 @@ namespace Oxide.Plugins
                 }
 
                 cupboard.SendNetworkUpdate();
+            }
+
+            var steeringWheel = entity as SteeringWheel;
+            if (steeringWheel != null)
+            {
+                object value;
+                if (data.TryGetValue("steeringWheel", out value) && value is Dictionary<string, object> dict)
+                {
+                    if (dict.TryGetValue("authorizedPlayers", out value) && value is List<object> rawAuth &&
+                        steeringWheel.Privilege != null)
+                    {
+                        for (var i = 0; i < rawAuth.Count; i++)
+                            steeringWheel.Privilege.authorizedPlayers.Add(Convert.ToUInt64(rawAuth[i]));
+                    }
+
+                    if (dict.TryGetValue("code", out value) && value is string code && steeringWheel.BoatLock != null &&
+                        steeringWheel.BoatLock.IsValidLockCode(code))
+                    {
+                        steeringWheel.BoatLock.Code = code;
+                    }
+                }
             }
 
             var tinCanAlarm = entity as TinCanAlarm;
@@ -2859,11 +2958,20 @@ namespace Oxide.Plugins
                     flags.Add(baseFlag, Convert.ToBoolean(flagData.Value));
             }
 
-            foreach (var flag in flags)
+            bool skipFlags = entity is Anchor && parent is PlayerBoat;
+            if (!skipFlags)
             {
-                entity.SetFlag(flag.Key, flag.Value);
+                foreach (var flag in flags)
+                    entity.SetFlag(flag.Key, flag.Value);
             }
             
+            // If the on flag was saved, toggle it off and enter edit mode so it can be properly triggered on
+            if (boatBuildingStation != null && boatBuildingStation.IsOn())
+            {
+                boatBuildingStation.SetFlag(BaseEntity.Flags.On, false);
+                boatBuildingStation.EnterEditMode();
+            }
+
             if (data.TryGetValue("boomBox", out var boomBoxObj) &&
                 boomBoxObj is Dictionary<string, object> boomBoxData && boomBoxData != null &&
                 entity.TryGetComponent<BoomBox>(out var boomBox))
@@ -2922,6 +3030,67 @@ namespace Oxide.Plugins
                             continue;
 
                         PasteEntity(childData, pasteData, entity);
+                    }
+
+                    if (entity is PlayerBoat playerBoat)
+                    {
+                        if (pasteData.playerBoats.TryGetValue(playerBoat, out var playerBoatData))
+                        {
+                            pasteData.playerBoats.Remove(playerBoat);
+
+                            Vector3 halfExtents;
+                            BoatBuildingStation.GetBoatBlocksOBBExtents(playerBoatData.blocks, playerBoat.transform.forward,
+                                out Vector3 _, out halfExtents, out Quaternion _);
+
+                            if (data.TryGetValue("lastEditLocalPos", out var rawPos) &&
+                                rawPos is Dictionary<string, object> posData)
+                            {
+                                playerBoat.lastEditLocalPos = new Vector3(
+                                    Convert.ToSingle(posData["x"]),
+                                    Convert.ToSingle(posData["y"]),
+                                    Convert.ToSingle(posData["z"])
+                                );
+                            }
+                            if (data.TryGetValue("lastEditLocalRot", out var rawRot) &&
+                                rawRot is Dictionary<string, object> rotData)
+                            {
+                                playerBoat.lastEditLocalRot = new Vector3(
+                                    Convert.ToSingle(rotData["x"]),
+                                    Convert.ToSingle(rotData["y"]),
+                                    Convert.ToSingle(rotData["z"])
+                                );
+                            }
+
+                            HashSet<Anchor> anchorsToLower = new();
+
+                            foreach (var rawChildObj in children)
+                            {
+                                if (rawChildObj is not Dictionary<string, object> childEntityData)
+                                    continue;
+
+                                if (!childEntityData.TryGetValue("oldID", out var childOldIdObj))
+                                    continue;
+
+                                if (!pasteData.EntityLookup.TryGetValue(Convert.ToUInt64(childOldIdObj), out var childLookupEntry) ||
+                                    !childLookupEntry.TryGetValue("entity", out var childLookupEntityObj) ||
+                                    childLookupEntityObj is not Anchor childLookupAnchor)
+                                    continue;
+
+                                if (childEntityData.TryGetValue("flags", out var mappedChildFlagsObj) &&
+                                    mappedChildFlagsObj is Dictionary<string, object> mappedChildFlagsData &&
+                                    mappedChildFlagsData.TryGetValue(nameof(BaseEntity.Flags.Reserved3), out var mappedChildLoweredFlagObj) &&
+                                    Convert.ToBoolean(mappedChildLoweredFlagObj))
+                                    anchorsToLower.Add(childLookupAnchor);
+                            }
+
+                            playerBoat.Init(playerBoatData.blocks, playerBoatData.deployables, halfExtents, false);
+
+                            pasteData.FinalProcessingActions.Add(() =>
+                            {
+                                foreach (var loweringAnchor in anchorsToLower)
+                                    loweringAnchor.LowerAnchor(null, true);
+                            });
+                        }
                     }
                 }
             }
@@ -5334,6 +5503,7 @@ namespace Oxide.Plugins
             public Dictionary<ulong, Dictionary<string, object>> EntityLookup =
                 new Dictionary<ulong, Dictionary<string, object>>();
 
+            public Dictionary<PlayerBoat, PlayerBoatData> playerBoats = new();
             public Dictionary<ulong, Item> ItemsWithSubEntity = new Dictionary<ulong, Item>();
             public List<Action> FinalProcessingActions = new List<Action>();
             public IPlayer Player;
@@ -5366,6 +5536,12 @@ namespace Oxide.Plugins
 #if DEBUG
             public Stopwatch Sw = new Stopwatch();
 #endif
+        }
+
+        public class PlayerBoatData
+        {
+            public List<BoatBuildingBlock> blocks = new();
+            public List<BaseEntity> deployables = new();
         }
 
         public struct OriginalTransforms
