@@ -2509,7 +2509,7 @@ namespace Oxide.Plugins
             if (partyBalloon != null)
             {
                 object value;
-                if (data.TryGetValue("balloonText", out value))
+                if (data.TryGetValue("balloonText", out value) && value != null)
                 {
                     var balloonText = value.ToString();
                     if (!String.IsNullOrEmpty(balloonText))
