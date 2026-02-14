@@ -2418,7 +2418,7 @@ namespace Oxide.Plugins
             if (ornateFrame != null)
             {
                 object value;
-                if (data.TryGetValue("frameText", out value))
+                if (data.TryGetValue("frameText", out value) && value != null)
                 {
                     var frameText = value.ToString();
                     if (!String.IsNullOrEmpty(frameText))
@@ -2509,7 +2509,7 @@ namespace Oxide.Plugins
             if (partyBalloon != null)
             {
                 object value;
-                if (data.TryGetValue("balloonText", out value))
+                if (data.TryGetValue("balloonText", out value) && value != null)
                 {
                     var balloonText = value.ToString();
                     if (!String.IsNullOrEmpty(balloonText))
