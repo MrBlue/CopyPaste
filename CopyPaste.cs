@@ -72,6 +72,10 @@ namespace Oxide.Plugins
         private readonly Dictionary<ItemDefinition, string> _itemDefToPrefab = new();
         private readonly uint _floorFramePrefabId = StringPool.Get("assets/prefabs/building core/floor.frame/floor.frame.prefab");
         private readonly uint _floorTriangleFramePrefabId = StringPool.Get("assets/prefabs/building core/floor.triangle.frame/floor.triangle.frame.prefab");
+        private const float LegacyElevatorLiftMaxHorizontalDistanceSqr = 1f;
+        private const float LegacyElevatorLiftVerticalTolerance = 0.5f;
+        private const float LegacyElevatorShaftMatchMaxHorizontalDistanceSqr = 1f;
+        private const float LegacyElevatorShaftMatchForwardDotMin = 0.98f;
         private bool _pasteReady;
         private readonly List<PasteData> _pendingPastes = new();
 
@@ -1208,6 +1212,8 @@ namespace Oxide.Plugins
             if (elevator != null)
             {
                 data.Add("Floor", elevator.Floor);
+                if (elevator.liftEntity.uid.Value != 0)
+                    data.Add("liftEntityID", elevator.liftEntity.uid.Value);
             }
 
             var weaponRack = entity as WeaponRack;
@@ -1446,7 +1452,8 @@ namespace Oxide.Plugins
                 data.Add("IOEntity", ioData);
             }
 
-            if (entity is StorageContainer || entity is Door || entity is ITowing || (isChild && entity is not IOEntity))
+            if (entity is StorageContainer or Door or ITowing or ElevatorLift ||
+                (isChild && entity is not IOEntity))
             {
                 data.Add("oldID", entity.net.ID.Value);
             }
@@ -2120,6 +2127,117 @@ namespace Oxide.Plugins
 
             ioEntity.SendNetworkUpdate();
             ioEntity.RefreshIndustrialPreventBuilding();
+        }
+
+        private ElevatorLift FindLegacyElevatorLiftForTopFloor(PasteData pasteData, Elevator elevator)
+        {
+            var floorZeroPos = elevator.GetWorldSpaceFloorPosition(0);
+            var topFloorPos = elevator.GetWorldSpaceFloorPosition(elevator.Floor);
+            var elevatorPos = elevator.transform.position;
+            var minY = Mathf.Min(floorZeroPos.y, topFloorPos.y) - LegacyElevatorLiftVerticalTolerance;
+            var maxY = Mathf.Max(floorZeroPos.y, topFloorPos.y) + LegacyElevatorLiftVerticalTolerance;
+
+            float nearestHorizontalDistanceSqr = float.MaxValue;
+            ElevatorLift closestLegacyLift = null;
+
+            foreach (var pastedEntity in pasteData.PastedEntities)
+            {
+                if (pastedEntity is not ElevatorLift candidateLegacyLift)
+                    continue;
+
+                if (!candidateLegacyLift.IsValid() || candidateLegacyLift.IsDestroyed)
+                    continue;
+
+                var candidatePos = candidateLegacyLift.transform.position;
+                if (candidatePos.y < minY || candidatePos.y > maxY)
+                    continue;
+
+                var horizontalDistanceSqr = new Vector2(candidatePos.x - elevatorPos.x, candidatePos.z - elevatorPos.z).sqrMagnitude;
+                if (horizontalDistanceSqr > LegacyElevatorLiftMaxHorizontalDistanceSqr)
+                    continue;
+
+                if (horizontalDistanceSqr < nearestHorizontalDistanceSqr)
+                {
+                    nearestHorizontalDistanceSqr = horizontalDistanceSqr;
+                    closestLegacyLift = candidateLegacyLift;
+                }
+            }
+
+            return closestLegacyLift;
+        }
+
+        private Dictionary<Elevator, LegacyElevatorRestoreState> GetLegacyElevatorRestoreStates(PasteData pasteData)
+        {
+            if (pasteData.LegacyElevatorRestoreStates != null)
+                return pasteData.LegacyElevatorRestoreStates;
+
+            var shaftGroups = new List<List<Elevator>>();
+
+            foreach (var pastedEntity in pasteData.PastedEntities)
+            {
+                if (pastedEntity is not Elevator candidateElevator ||
+                    !candidateElevator.IsValid() || candidateElevator.IsDestroyed)
+                    continue;
+
+                var candidatePos = candidateElevator.transform.position;
+                var candidateForward = candidateElevator.transform.forward;
+
+                List<Elevator> matchedShaftGroup = null;
+                for (var i = 0; i < shaftGroups.Count; i++)
+                {
+                    var shaftGroup = shaftGroups[i];
+                    if (shaftGroup == null || shaftGroup.Count == 0)
+                        continue;
+
+                    var shaftReference = shaftGroup[0];
+                    if (shaftReference == null || !shaftReference.IsValid() || shaftReference.IsDestroyed)
+                        continue;
+
+                    var referencePos = shaftReference.transform.position;
+                    var horizontalDistanceSqr = new Vector2(candidatePos.x - referencePos.x, candidatePos.z - referencePos.z).sqrMagnitude;
+                    if (horizontalDistanceSqr > LegacyElevatorShaftMatchMaxHorizontalDistanceSqr)
+                        continue;
+
+                    if (Mathf.Abs(Vector3.Dot(candidateForward, shaftReference.transform.forward)) < LegacyElevatorShaftMatchForwardDotMin)
+                        continue;
+
+                    matchedShaftGroup = shaftGroup;
+                    break;
+                }
+
+                if (matchedShaftGroup == null)
+                {
+                    matchedShaftGroup = new List<Elevator>();
+                    shaftGroups.Add(matchedShaftGroup);
+                }
+
+                matchedShaftGroup.Add(candidateElevator);
+            }
+
+            var restoreStates = new Dictionary<Elevator, LegacyElevatorRestoreState>();
+            foreach (var shaftGroup in shaftGroups)
+            {
+                if (shaftGroup == null || shaftGroup.Count == 0)
+                    continue;
+
+                shaftGroup.Sort((left, right) => left.transform.position.y.CompareTo(right.transform.position.y));
+
+                for (var floor = 0; floor < shaftGroup.Count; floor++)
+                {
+                    var shaftElevator = shaftGroup[floor];
+                    if (shaftElevator == null || !shaftElevator.IsValid() || shaftElevator.IsDestroyed)
+                        continue;
+
+                    restoreStates[shaftElevator] = new LegacyElevatorRestoreState
+                    {
+                        Floor = floor,
+                        IsTop = floor == shaftGroup.Count - 1
+                    };
+                }
+            }
+
+            pasteData.LegacyElevatorRestoreStates = restoreStates;
+            return restoreStates;
         }
 
         private void PasteEntity(Dictionary<string, object> data, PasteData pasteData, BaseEntity parent = null)
@@ -2948,9 +3066,72 @@ namespace Oxide.Plugins
             }
 
             var elevator = entity as Elevator;
-            if (elevator != null && data.ContainsKey("Floor"))
+            if (elevator != null)
             {
-                elevator.Floor = Convert.ToInt32(data["Floor"]);
+                if (data.ContainsKey("Floor"))
+                    elevator.Floor = Convert.ToInt32(data["Floor"]);
+
+                if (data.TryGetValue("liftEntityID", out var rawId) &&
+                    Convert.ToUInt64(rawId) is var oldLiftId && oldLiftId != 0)
+                {
+                    pasteData.FinalProcessingActions.Add(() =>
+                    {
+                        if (pasteData.EntityLookup.TryGetValue(oldLiftId, out var entry) &&
+                            entry.TryGetValue("entity", out var obj) &&
+                            obj is ElevatorLift lift &&
+                            lift.IsValid() && !lift.IsDestroyed)
+                        {
+
+                            if (elevator.liftEntity.TryGet(true, out var existing) &&
+                                existing.IsValid() && !existing.IsDestroyed)
+                            {
+                                existing.Kill();
+                            }
+
+                            elevator.liftEntity.Set(lift);
+                            lift.SetOwnerElevator(elevator);
+                        }
+                    });
+                }
+                else if (pasteData.Version <= new VersionNumber(4, 2, 7))
+                {
+                    pasteData.FinalProcessingActions.Add(() =>
+                    {
+                        if (!elevator.IsValid() || elevator.IsDestroyed)
+                            return;
+
+                        if (GetLegacyElevatorRestoreStates(pasteData).TryGetValue(elevator, out var restoreState))
+                        {
+                            if (elevator.Floor != restoreState.Floor)
+                            {
+                                elevator.Floor = restoreState.Floor;
+                                elevator.SendNetworkUpdate();
+                            }
+
+                            if (elevator.IsTop != restoreState.IsTop)
+                                elevator.SetFlag(BaseEntity.Flags.Reserved1, restoreState.IsTop);
+
+                            if (!restoreState.IsTop)
+                                return;
+                        }
+                        else if (!elevator.IsTop)
+                            return;
+
+                        var legacyPasteLift = FindLegacyElevatorLiftForTopFloor(pasteData, elevator);
+                        if (legacyPasteLift == null)
+                            return;
+
+                        if (elevator.liftEntity.TryGet(true, out var generatedLiftEntity) &&
+                            generatedLiftEntity.IsValid() && !generatedLiftEntity.IsDestroyed &&
+                            generatedLiftEntity != legacyPasteLift)
+                        {
+                            generatedLiftEntity.Kill();
+                        }
+
+                        elevator.liftEntity.Set(legacyPasteLift);
+                        legacyPasteLift.SetOwnerElevator(elevator);
+                    });
+                }
             }
 
             var weaponRack = entity as WeaponRack;
@@ -5771,6 +5952,7 @@ namespace Oxide.Plugins
             public List<Action> FinalProcessingActions = new List<Action>();
             public IPlayer Player;
             public BasePlayer BasePlayer;
+            public Dictionary<Elevator, LegacyElevatorRestoreState> LegacyElevatorRestoreStates;
             public List<StabilityEntity> StabilityEntities = new List<StabilityEntity>();
             public List<IndustrialStorageAdaptor> industrialStorageAdaptors = new List<IndustrialStorageAdaptor>();
             public List<ConnectedSpeaker> ConnectedSpeakers = new List<ConnectedSpeaker>();
@@ -5808,6 +5990,12 @@ namespace Oxide.Plugins
         {
             public List<BoatBuildingBlock> blocks = new();
             public List<BaseEntity> deployables = new();
+        }
+
+        public class LegacyElevatorRestoreState
+        {
+            public int Floor;
+            public bool IsTop;
         }
 
         public struct OriginalTransforms
