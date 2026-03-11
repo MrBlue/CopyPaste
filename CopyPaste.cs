@@ -879,9 +879,18 @@ namespace Oxide.Plugins
             {
                 var genes = GrowableGeneEncoding.EncodeGenesToInt(growableEntity.Genes);
                 if (genes > 0)
-                {
                     data.Add("genes", genes);
-                }
+
+                var previousGenes = GrowableGeneEncoding.EncodePreviousGenesToInt(growableEntity.Genes);
+                if (previousGenes > 0)
+                    data.Add("previousGenes", previousGenes);
+
+                data.Add("state", growableEntity.State);
+                data.Add("totalAge", growableEntity.Age);
+                data.Add("stageAge", growableEntity.stageAge);
+                data.Add("yieldFraction", growableEntity.Yield);
+                data.Add("yieldPool", growableEntity.yieldPool);
+                data.Add("fertilized", growableEntity.Fertilized);
 
                 var perent = growableEntity.GetParentEntity();
                 if (perent != null)
@@ -1267,6 +1276,10 @@ namespace Oxide.Plugins
                 data.Add("currentMaterials", constructableEntity.currentMaterials.ToArray());
                 data.Add("health", constructableEntity.Health());
             }
+
+            var planterBox = entity as PlanterBox;
+            if (planterBox != null)
+                data.Add("soilSaturation", planterBox.soilSaturation);
 
             var boomBox = entity.GetComponent<BoomBox>();
             if (boomBox != null)
@@ -2821,6 +2834,53 @@ namespace Oxide.Plugins
                 constructableEntity.UpdateState();
             }
 
+            var planterBox = entity as PlanterBox;
+            if (planterBox != null)
+            {
+                if (data.TryGetValue("soilSaturation", out var rawSoilSaturation))
+                    planterBox.soilSaturation = Convert.ToInt32(rawSoilSaturation);
+            }
+
+            if (entity is ISplashable)
+            {
+                pasteData.FinalProcessingActions.Add(() =>
+                {
+                    if (!entity.IsValid() || entity.IsDestroyed)
+                        return;
+
+                    Sprinkler.SplashableGrid.DeregisterEntity(entity);
+                    Sprinkler.SplashableGrid.RegisterEntity(entity);
+                });
+            }
+
+            var growableEntity = entity as GrowableEntity;
+            if (growableEntity != null)
+            {
+                if (data.TryGetValue("genes", out var rawGenes))
+                    GrowableGeneEncoding.DecodeIntToGenes(Convert.ToInt32(rawGenes), growableEntity.Genes);
+
+                if (data.TryGetValue("previousGenes", out var rawPreviousGenes))
+                    GrowableGeneEncoding.DecodeIntToPreviousGenes(Convert.ToInt32(rawPreviousGenes), growableEntity.Genes);
+
+                if (data.TryGetValue("totalAge", out var rawTotalAge))
+                    growableEntity.Age = Convert.ToSingle(rawTotalAge);
+
+                if (data.TryGetValue("stageAge", out var rawStageAge))
+                    growableEntity.stageAge = Convert.ToSingle(rawStageAge);
+
+                if (data.TryGetValue("yieldFraction", out var rawYieldFraction))
+                    growableEntity.Yield = Convert.ToSingle(rawYieldFraction);
+
+                if (data.TryGetValue("yieldPool", out var rawYieldPool))
+                    growableEntity.yieldPool = Convert.ToSingle(rawYieldPool);
+
+                if (data.TryGetValue("fertilized", out var rawFertilized))
+                    growableEntity.Fertilized = Convert.ToBoolean(rawFertilized);
+
+                if (data.TryGetValue("state", out var rawState))
+                    growableEntity.ChangeState((PlantProperties.State) Convert.ToSingle(rawState), false, true);
+            }
+
             var ioEntity = entity as IOEntity;
             if (ioEntity.IsValid() && !ioEntity.IsDestroyed)
             {
@@ -3031,6 +3091,19 @@ namespace Oxide.Plugins
 
             if (!ioEntity.IsValid() || ioEntity.IsDestroyed)
                 return;
+
+            if (ioEntity is Sprinkler sprinkler)
+            {
+                pasteData.FinalProcessingActions.Add(() =>
+                {
+                    if (!sprinkler.IsValid() || sprinkler.IsDestroyed || !sprinkler.IsOn())
+                        return;
+
+                    // Clear the on flag and rerun sprinkler startup so DoSplash is invoked without clearing fuel state
+                    sprinkler.SetFlag(BaseEntity.Flags.On, false);
+                    sprinkler.TurnOn();
+                });
+            }
 
             List<object> inputs = null;
             if (ioData.ContainsKey("inputs"))
