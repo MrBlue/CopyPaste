@@ -681,23 +681,6 @@ namespace Oxide.Plugins
             var batchSize = checkFrom.Count < _config.CopyBatchSize ? checkFrom.Count : _config.CopyBatchSize;
             var range = copyData.Range;
 
-            /*
-                BUILDING BLOCK DETECTION FIX:
-                Rust building blocks (foundations, walls, etc.) are 3m x 3m. When the plugin's detection range is
-                exactly 3.0f (default) and starting from one building block, Vis.Entities() detection extends precisely
-                to the edge of adjacent blocks but doesn't cross their boundaries.
-
-                This creates an edge case where connected building blocks aren't always detected (depending on the
-                block's grade and or skin) when there are no deployables positioned such that they would fall within 3m
-                range of adjacent building blocks (which would otherwise cause those blocks to be detected).
-
-                By adding a tiny amount (0.001f) to the range when it's exactly 3.0f, we ensure Vis.Entities() detection
-                slightly overlaps adjacent blocks, properly capturing the entire connected structure without
-                significantly changing the intended detection range.
-            */
-            if (range == 3.0f)
-                range += 0.001f;
-
             for (var i = 0; i < batchSize; i++)
             {
                 if (checkFrom.Count == 0)
@@ -721,9 +704,10 @@ namespace Oxide.Plugins
                         if (!houseList.Add(entity))
                             continue;
 
+                        var buildingBlock = entity as BuildingBlock;
                         if (copyMechanics == CopyMechanics.Building)
                         {
-                            var buildingBlock = entity.GetComponentInParent<BuildingBlock>();
+                            buildingBlock ??= entity.GetComponentInParent<BuildingBlock>();
 
                             if (buildingBlock != null)
                             {
@@ -735,8 +719,11 @@ namespace Oxide.Plugins
                             }
                         }
 
+                        if (buildingBlock != null)
+                            QueueConnectedBlocks(copyData, buildingBlock);
+
                         var transform = entity.transform;
-                        if (copyData.EachToEach)
+                        if (copyData.EachToEach && copyData.ScannedPositions.Add(transform.position))
                             checkFrom.Push(transform.position);
 
                         if (entity.GetComponent<BaseLock>() != null)
@@ -795,6 +782,35 @@ namespace Oxide.Plugins
                 copyData.Callback?.Invoke();
 
                 Interface.CallHook("OnCopyFinished", copyData.RawData, copyData.Filename, copyData.Player, copyData.SourcePos);
+            }
+        }
+
+        private void QueueConnectedBlocks(CopyData copyData, BuildingBlock block)
+        {
+            var checkFrom = copyData.CheckFrom;
+            var scannedPositions = copyData.ScannedPositions;
+            var houseList = copyData.HouseList;
+
+            var links = block.GetEntityLinks();
+            if (links == null || links.Count == 0)
+                return;
+
+            for (var i = 0; i < links.Count; i++)
+            {
+                var link = links[i];
+                if (link == null)
+                    continue;
+
+                var connections = link.connections;
+                if (connections == null)
+                    continue;
+
+                for (var j = 0; j < connections.Count; j++)
+                {
+                    var neighbor = connections[j].owner as BuildingBlock;
+                    if (neighbor != null && neighbor.IsValid() && !houseList.Contains(neighbor) && scannedPositions.Add(neighbor.transform.position))
+                        checkFrom.Push(neighbor.transform.position);
+                }
             }
         }
 
@@ -5304,6 +5320,7 @@ namespace Oxide.Plugins
             public IPlayer Player;
             public BasePlayer BasePlayer;
             public Stack<Vector3> CheckFrom = new Stack<Vector3>();
+            public HashSet<Vector3> ScannedPositions = new HashSet<Vector3>();
             public HashSet<BaseEntity> HouseList = new HashSet<BaseEntity>();
             public List<object> RawData = new List<object>();
             public Vector3 SourcePos;
