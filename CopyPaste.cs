@@ -1687,6 +1687,9 @@ namespace Oxide.Plugins
 
                 pasteData.FinalProcessingActions.ForEach(action => action());
 
+                TrySplitPastedBuilding(pasteData);
+                PasteDelayedCupboards(pasteData);
+
                 pasteData.Player.Reply(Lang("PASTE_SUCCESS", pasteData.Player.Id));
 #if DEBUG
                 pasteData.Player.Reply($"Stopwatch took: {pasteData.Sw.Elapsed.TotalMilliseconds} ms");
@@ -1700,6 +1703,37 @@ namespace Oxide.Plugins
                 pasteData.CallbackFinished?.Invoke();
 
                 Interface.CallHook("OnPasteFinished", pasteData.PastedEntities, pasteData.Filename, pasteData.Player, pasteData.StartPos);
+            }
+        }
+
+        private void TrySplitPastedBuilding(PasteData pasteData)
+        {
+            if (pasteData.CupboardCount < 2 || pasteData.BuildingId == 0)
+                return;
+
+            var building = BuildingManager.server.GetBuilding(pasteData.BuildingId);
+            if (building != null && building.HasDecayEntities())
+                BuildingManager.server.CheckSplit(building.decayEntities[0]);
+        }
+
+        private void PasteDelayedCupboards(PasteData pasteData)
+        {
+            var delayedCupboardsData = pasteData.DelayedCupboardsData;
+            if (delayedCupboardsData == null)
+                return;
+
+            pasteData.DelayedCupboardsData = null;
+            pasteData.ReplayingDelayedCupboards = true;
+            try
+            {
+                for (var i = 0; i < delayedCupboardsData.Count; i++)
+                {
+                    PasteEntity(delayedCupboardsData[i], pasteData);
+                }
+            }
+            finally
+            {
+                pasteData.ReplayingDelayedCupboards = false;
             }
         }
 
@@ -1955,6 +1989,13 @@ namespace Oxide.Plugins
                 }
             }
 
+            if (!isChild && !pasteData.ReplayingDelayedCupboards && prefabname.Contains("cupboard.tool") && ++pasteData.CupboardCount >= 2)
+            {
+                pasteData.DelayedCupboardsData ??= new();
+                pasteData.DelayedCupboardsData.Add(data);
+                return;
+            }
+
             var pos = isChild ? Vector3.zero : (Vector3)data["position"];
             var rot = isChild ? Quaternion.identity : (Quaternion)data["rotation"];
             var localPos = isChild ? (Vector3)data["position"] : Vector3.zero;
@@ -2084,7 +2125,16 @@ namespace Oxide.Plugins
                 if (pasteData.BuildingId == 0)
                     pasteData.BuildingId = BuildingManager.server.NewBuildingID();
 
-                decayEntity.AttachToBuilding(pasteData.BuildingId);
+                if (pasteData.ReplayingDelayedCupboards && decayEntity is BuildingPrivlidge)
+                {
+                    var nearbyBuildingBlock = decayEntity.GetNearbyBuildingBlock();
+                    var building = nearbyBuildingBlock?.GetBuilding();
+                    decayEntity.buildingID = building?.ID ?? pasteData.BuildingId;
+                }
+                else
+                {
+                    decayEntity.AttachToBuilding(pasteData.BuildingId);
+                }
             }
 
             var stabilityEntity = entity as StabilityEntity;
@@ -5360,7 +5410,10 @@ namespace Oxide.Plugins
             public bool Cancelled = false;
 
             public uint BuildingId = 0;
-            
+            public int CupboardCount;
+            public List<Dictionary<string, object>> DelayedCupboardsData;
+            public bool ReplayingDelayedCupboards;
+
             public VersionNumber Version { get; set; }
 
 #if DEBUG
