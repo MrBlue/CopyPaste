@@ -1376,6 +1376,10 @@ namespace Oxide.Plugins
                     ioData.Add("alarms", alarms);
                 }
 
+                var electricBattery = ioEntity as ElectricBattery;
+                if (electricBattery != null)
+                    ioData.Add("rustWattSeconds", electricBattery.rustWattSeconds);
+
                 data.Add("IOEntity", ioData);
             }
 
@@ -3315,6 +3319,19 @@ namespace Oxide.Plugins
 
                 if (pasteData.checkPosition != null)
                     pasteData.checkPosition.Add(ioEntity);
+            }
+
+            var electricBattery = ioEntity as ElectricBattery;
+            if (electricBattery != null)
+            {
+                if (ioData.TryGetValue("rustWattSeconds", out var rustWattSeconds))
+                    electricBattery.SetCharge(Convert.ToSingle(rustWattSeconds));
+
+                if (electricBattery.IsOn())
+                {
+                    electricBattery.SetPassthroughOn(false);
+                    electricBattery.CheckDischarge();
+                }
             }
 
             ioEntity.MarkDirty();
