@@ -69,6 +69,8 @@ namespace Oxide.Plugins
         private readonly HashSet<ulong> _paidSkinIds = new();
         private readonly Dictionary<string, ItemDefinition> _prefabToItemDef = new();
         private readonly Dictionary<ItemDefinition, string> _itemDefToPrefab = new();
+        private readonly uint _floorFramePrefabId = StringPool.Get("assets/prefabs/building core/floor.frame/floor.frame.prefab");
+        private readonly uint _floorTriangleFramePrefabId = StringPool.Get("assets/prefabs/building core/floor.triangle.frame/floor.triangle.frame.prefab");
         private bool _pasteReady;
         private readonly List<PasteData> _pendingPastes = new();
 
@@ -1659,6 +1661,9 @@ namespace Oxide.Plugins
                     SetItemSubEntity(pasteData, keyPair.Value, keyPair.Key);
                 }
 
+                if (pasteData.Version <= new VersionNumber(4, 2, 7))
+                    SnapLegacyFloorFrameEntities(pasteData);
+
                 foreach (var entity in pasteData.StabilityEntities)
                 {
                     entity.grounded = false;
@@ -1732,6 +1737,107 @@ namespace Oxide.Plugins
                 doorManipulator.SetParent(foundDoor, true);
                 doorManipulator.SetTargetDoor(foundDoor);
             }
+        }
+
+        private void SnapLegacyFloorFrameEntities(PasteData pasteData)
+        {
+            // Legacy saves can place floor-frame deployables 0.1m low; link only the expected frame sockets instead of refreshing all nearby entity links.
+            List<BaseEntity> floorFrameTargets = null;
+
+            for (int i = 0; i < pasteData.PastedEntities.Count; i++)
+            {
+                StabilityEntity entity = pasteData.PastedEntities[i] as StabilityEntity;
+                if (!entity.IsValid() || entity.IsDestroyed || entity is BuildingBlock)
+                    continue;
+
+                List<EntityLink> links = entity.links;
+                if (links == null || links.Count == 0)
+                    continue;
+
+                for (int j = 0; j < links.Count; j++)
+                {
+                    EntityLink link = links[j];
+                    ConstructionSocket socket = link.socket as ConstructionSocket;
+                    if (socket == null || !socket.male || link.connections.Count != 0 || !IsFloorFrameSocket(socket))
+                        continue;
+
+                    if (floorFrameTargets == null)
+                    {
+                        floorFrameTargets = Pool.Get<List<BaseEntity>>();
+                        for (int k = 0; k < pasteData.PastedEntities.Count; k++)
+                        {
+                            BaseEntity target = pasteData.PastedEntities[k];
+                            if (!target.IsValid() || target.IsDestroyed || target is not BuildingBlock)
+                                continue;
+
+                            uint prefabID = target.prefabID;
+                            if (prefabID == _floorFramePrefabId || prefabID == _floorTriangleFramePrefabId)
+                                floorFrameTargets.Add(target);
+                        }
+                    }
+
+                    SnapLegacyFloorFrameEntity(floorFrameTargets, entity, link);
+                    break;
+                }
+            }
+
+            if (floorFrameTargets != null)
+                Pool.FreeUnmanaged(ref floorFrameTargets);
+        }
+
+        private void SnapLegacyFloorFrameEntity(List<BaseEntity> floorFrameTargets, BaseEntity entity, EntityLink maleLink)
+        {
+            const float targetRadiusSqr = 0.5f * 0.5f;
+
+            Transform transform = entity.transform;
+            Vector3 offset = new Vector3(0f, 0.1f, 0f);
+            transform.position += offset;
+            Vector3 malePosition = transform.position + transform.rotation * maleLink.socket.worldPosition;
+
+            for (int i = 0; i < floorFrameTargets.Count; i++)
+            {
+                BaseEntity target = floorFrameTargets[i];
+
+                if (!target.IsValid() || target.IsDestroyed || target == entity)
+                    continue;
+
+                Transform targetTransform = target.transform;
+                if ((targetTransform.position - malePosition).sqrMagnitude > targetRadiusSqr)
+                    continue;
+
+                List<EntityLink> targetLinks = target.links;
+                if (targetLinks == null || targetLinks.Count == 0)
+                    continue;
+
+                bool connected = false;
+                for (int j = 0; j < targetLinks.Count; j++)
+                {
+                    EntityLink targetLink = targetLinks[j];
+
+                    ConstructionSocket targetSocket = targetLink.socket as ConstructionSocket;
+                    if (targetSocket == null || !targetSocket.female || !IsFloorFrameSocket(targetSocket) || !maleLink.CanConnect(targetLink))
+                        continue;
+
+                    if (!maleLink.Contains(targetLink))
+                        maleLink.Add(targetLink);
+
+                    if (!targetLink.Contains(maleLink))
+                        targetLink.Add(maleLink);
+
+                    connected = true;
+                }
+
+                if (connected)
+                    return;
+            }
+
+            transform.position -= offset;
+        }
+
+        private bool IsFloorFrameSocket(ConstructionSocket socket)
+        {
+            return socket.socketType == ConstructionSocket.Type.FloorFrame ||
+                   socket.socketType == ConstructionSocket.Type.FloorFrameTriangle;
         }
 
         private void AdjustIOEntityPositions(PasteData pasteData)
