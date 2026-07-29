@@ -414,15 +414,13 @@ namespace Oxide.Plugins
 
         public static bool IsDlcItem(ItemDefinition definition)
         {
-            var bp = definition.Blueprint;
-            var parent = definition.Parent ?? definition.isRedirectOf;
-            var parentBp = parent?.Blueprint;
+            var parent = definition.Parent;
             return
-                (definition.steamItem is not null && definition.steamItem.id != 0) ||
-                (definition.steamDlc is not null && definition.steamDlc.dlcAppID != 0) ||
-                (bp is not null && bp.NeedsSteamDLC) ||
-                (parentBp is not null && parentBp.NeedsSteamDLC) ||
-                definition.isRedirectOf is not null;
+                (definition.steamItem != null && definition.steamItem.id != 0) ||
+                (definition.steamDlc != null && definition.steamDlc.dlcAppID != 0) ||
+                (definition.Blueprint != null && definition.steamDlc != null) ||
+                (parent != null && parent.Blueprint != null && parent.steamDlc != null) ||
+                definition.isRedirectOf != null;
         }
 
         public ulong FilterSkinId(PasteData pasteData, ulong skinId)
