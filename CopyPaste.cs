@@ -2517,12 +2517,9 @@ namespace Oxide.Plugins
                     if (data.TryGetValue(idKey, out rawValue))
                     {
                         ulong wallpaperId = Convert.ToUInt64(rawValue);
-                        if (wallpaperId == 0UL)
-                            continue;
-
                         int currentSide = side;
                         float rotation = 0f;
-                        float health = BuildingBlock.WALLPAPER_MAXHEALTH;
+                        float health = 0f;
 
                         string rotationKey = currentSide == 0 ? "wallpaperRotation" : "wallpaperRotation2";
                         if (data.TryGetValue(rotationKey, out rawValue))
@@ -2532,21 +2529,27 @@ namespace Oxide.Plugins
                         if (data.TryGetValue(healthKey, out rawValue))
                             health = Convert.ToSingle(rawValue);
 
-                        // Defer wallpaper until all building blocks are pasted.
-                        // Interior wallpaper (side 1) must be "inside" (fully enclosed)
-                        // or it will despawn on the next stability tick
-                        pasteData.FinalProcessingActions.Add(() =>
+                        if (health > 0)
                         {
-                            if (buildingBlock == null || !buildingBlock.IsValid() || buildingBlock.IsDestroyed)
-                                return;
+                            if (health > BuildingBlock.WALLPAPER_MAXHEALTH)
+                                health = BuildingBlock.WALLPAPER_MAXHEALTH;
 
-                            buildingBlock.SetWallpaper(wallpaperId, currentSide, rotation);
+                            // Defer wallpaper until all building blocks are pasted.
+                            // Interior wallpaper (side 1) must be "inside" (fully enclosed)
+                            // or it will despawn on the next stability tick
+                            pasteData.FinalProcessingActions.Add(() =>
+                            {
+                                if (buildingBlock == null || !buildingBlock.IsValid() || buildingBlock.IsDestroyed)
+                                    return;
 
-                            if (currentSide == 0)
-                                buildingBlock.wallpaperHealth = health;
-                            else
-                                buildingBlock.wallpaperHealth2 = health;
-                        });
+                                buildingBlock.SetWallpaper(wallpaperId, currentSide, rotation);
+
+                                if (currentSide == 0)
+                                    buildingBlock.wallpaperHealth = health;
+                                else
+                                    buildingBlock.wallpaperHealth2 = health;
+                            });
+                        }
                     }
                 }
             }
