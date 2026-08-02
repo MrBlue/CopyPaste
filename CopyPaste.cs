@@ -991,6 +991,14 @@ namespace Oxide.Plugins
                 ExtractTextures(data, photoEntity.GetContentCRCs, entity, FileStorage.Type.jpg);
             }
 
+            var baseSculpture = entity as BaseSculpture;
+            if (baseSculpture != null && baseSculpture.crc != 0)
+            {
+                var sculptureData = FileStorage.server.Get(baseSculpture.crc, FileStorage.Type.sculpt, entity.net.ID);
+                if (sculptureData != null && sculptureData.Length != 0)
+                    data.Add("sculpture", Convert.ToBase64String(sculptureData));
+            }
+
             var photoFrame = entity as PhotoFrame;
             if (photoFrame != null && photoFrame._photoEntity.uid.IsValid)
             {
@@ -2497,6 +2505,17 @@ namespace Oxide.Plugins
 
             if (entity.net == null || entity.IsDestroyed)
                 return;
+
+            var baseSculpture = entity as BaseSculpture;
+            if (baseSculpture != null)
+            {
+                if (data.TryGetValue("sculpture", out var sculptureObj) &&
+                    sculptureObj is string encodedSculpture &&
+                    !String.IsNullOrEmpty(encodedSculpture))
+                {
+                    baseSculpture.LoadFromData(Convert.FromBase64String(encodedSculpture));
+                }
+            }
 
             var baseCombat = entity as BaseCombatEntity;
             if (buildingBlock != null)
