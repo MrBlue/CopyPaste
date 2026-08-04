@@ -1341,6 +1341,33 @@ namespace Oxide.Plugins
             if (boomBox != null)
                 ExtractBoomBox(data, boomBox);
 
+            var deployableBoomBox = entity as DeployableBoomBox;
+            if (deployableBoomBox != null)
+                data.Add("volume", deployableBoomBox.Volume);
+
+            var dartsGameBoard = entity as DartsGameBoard;
+            if (dartsGameBoard != null && dartsGameBoard.Leaderboard != null && dartsGameBoard.Leaderboard.Count > 0)
+            {
+                var leaderboard = new List<object>(Math.Min(dartsGameBoard.Leaderboard.Count, 5));
+                for (var i = 0; i < dartsGameBoard.Leaderboard.Count && i < 5; i++)
+                {
+                    var entry = dartsGameBoard.Leaderboard[i];
+                    if (entry == null)
+                        continue;
+
+                    leaderboard.Add(new Dictionary<string, object>
+                    {
+                        { "userid", entry.userid },
+                        { "playerName", entry.playerName },
+                        { "dartsThrown", entry.dartsThrown },
+                        { "timeTaken", entry.timeTaken }
+                    });
+                }
+
+                if (leaderboard.Count > 0)
+                    data.Add("dartsLeaderboard", leaderboard);
+            }
+
             var ioEntity = entity as IOEntity;
 
             if (ioEntity.IsValid() && !ioEntity.IsDestroyed)
@@ -3383,6 +3410,53 @@ namespace Oxide.Plugins
             {
                 boatBuildingStation.SetFlag(BaseEntity.Flags.On, false);
                 boatBuildingStation.EnterEditMode();
+            }
+
+            var deployableBoomBox = entity as DeployableBoomBox;
+            if (deployableBoomBox != null)
+            {
+                if (data.TryGetValue("volume", out var volumeObj))
+                {
+                    deployableBoomBox.Volume = Mathf.Clamp(Convert.ToSingle(volumeObj),
+                        DeployableBoomBox.MinVolume,
+                        DeployableBoomBox.MaxVolume);
+                }
+            }
+
+            var dartsGameBoard = entity as DartsGameBoard;
+            if (dartsGameBoard != null && data.TryGetValue("dartsLeaderboard", out var leaderboardObj))
+            {
+                var leaderboardData = leaderboardObj as List<object>;
+                if (leaderboardData != null)
+                {
+                    if (dartsGameBoard.Leaderboard == null)
+                        dartsGameBoard.Leaderboard = new List<DartsGameLeaderboard.DartsGameLeaderboardEntry>();
+                    else
+                        dartsGameBoard.Leaderboard.Clear();
+
+                    for (var i = 0; i < leaderboardData.Count && i < 5; i++)
+                    {
+                        var entryData = leaderboardData[i] as Dictionary<string, object>;
+                        if (entryData == null)
+                            continue;
+
+                        var entry = new DartsGameLeaderboard.DartsGameLeaderboardEntry();
+                        if (entryData.TryGetValue("userid", out var value))
+                            entry.userid = Convert.ToUInt64(value);
+                        if (entryData.TryGetValue("playerName", out value))
+                            entry.playerName = value?.ToString() ?? string.Empty;
+                        else
+                            entry.playerName = string.Empty;
+                        if (entryData.TryGetValue("dartsThrown", out value))
+                            entry.dartsThrown = Convert.ToInt32(value);
+                        if (entryData.TryGetValue("timeTaken", out value))
+                            entry.timeTaken = Convert.ToSingle(value);
+
+                        dartsGameBoard.Leaderboard.Add(entry);
+                    }
+
+                    dartsGameBoard.SendNetworkUpdate();
+                }
             }
 
             if (data.TryGetValue("boomBox", out var boomBoxObj) &&
