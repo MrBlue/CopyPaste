@@ -331,10 +331,7 @@ namespace Oxide.Plugins
             {
                 lang.RegisterMessages(cLangs.Value, this, cLangs.Key);
             }
-        }
 
-        private void OnServerInitialized()
-        {
             LoadVariables();
 
             Vis.colBuffer = new Collider[8192 * 16];
