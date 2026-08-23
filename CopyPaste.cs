@@ -2339,6 +2339,10 @@ namespace Oxide.Plugins
 
             if (entity == null)
                 return;
+
+            var savedFlags = data.TryGetValue("flags", out var obj) && obj is Dictionary<string, object> rawFlags ? rawFlags : null;
+            var restoredDoorAnimationFlagsBeforeSpawn = false;
+            var pastedDoor = entity as Door;
             
             var transform = entity.transform;
             
@@ -2493,7 +2497,14 @@ namespace Oxide.Plugins
             }
 
             if (!entity.isSpawned)
+            {
+                if (pastedDoor != null && savedFlags != null)
+                {
+                    restoredDoorAnimationFlagsBeforeSpawn = RestoreDoorAnimationFlagsBeforeSpawn(pastedDoor, savedFlags);
+                }
+
                 entity.Spawn();
+            }
 
             if (entity.net == null || entity.IsDestroyed)
                 return;
@@ -3357,25 +3368,29 @@ namespace Oxide.Plugins
                 }
             }
             
-            var flagsData = new Dictionary<string, object>();
-
-            if (data.ContainsKey("flags"))
-                flagsData = data["flags"] as Dictionary<string, object>;
-
-            var flags = new Dictionary<BaseEntity.Flags, bool>();
-
-            foreach (var flagData in flagsData)
-            {
-                BaseEntity.Flags baseFlag;
-                if (Enum.TryParse(flagData.Key, out baseFlag))
-                    flags.Add(baseFlag, Convert.ToBoolean(flagData.Value));
-            }
-
             bool skipFlags = entity is Anchor && parent is PlayerBoat;
-            if (!skipFlags)
+            if (!skipFlags && savedFlags != null)
             {
-                foreach (var flag in flags)
-                    entity.SetFlag(flag.Key, flag.Value);
+                using (var updateFlags = entity.StartSetFlags(BaseEntity.FlagsUpdateMode.SendNetworkUpdate))
+                {
+                    foreach ((string name, object value) in savedFlags)
+                    {
+                        if (!Enum.TryParse(name, out BaseEntity.Flags flag))
+                            continue;
+
+                        if (pastedDoor != null)
+                        {
+                            if (flag == BaseEntity.Flags.Busy)
+                                continue;
+
+                            if (restoredDoorAnimationFlagsBeforeSpawn &&
+                                (flag == BaseEntity.Flags.Open || flag == Door.ReverseOpen))
+                                continue;
+                        }
+
+                        updateFlags.Set(flag, Convert.ToBoolean(value));
+                    }
+                }
             }
             
             // If the on flag was saved, toggle it off and enter edit mode so it can be properly triggered on
@@ -3602,6 +3617,28 @@ namespace Oxide.Plugins
 
             pasteData.PastedEntities.Add(entity);
             pasteData.CallbackSpawned?.Invoke(entity);
+        }
+
+        private static bool RestoreDoorAnimationFlagsBeforeSpawn(Door door, Dictionary<string, object> flags)
+        {
+            bool hasOpen = flags.TryGetValue(nameof(BaseEntity.Flags.Open), out object openValue);
+            bool hasReverseOpen = flags.TryGetValue(nameof(BaseEntity.Flags.Reserved1), out object reverseOpenValue);
+            if (!hasOpen && !hasReverseOpen)
+                return false;
+
+            // Initialize the animator in its saved pose instead of starting a door animation after spawn.
+            using (var updateFlags = door.StartSetFlags(BaseEntity.FlagsUpdateMode.SendNetworkUpdate))
+            {
+                if (hasOpen)
+                    updateFlags.Set(BaseEntity.Flags.Open, Convert.ToBoolean(openValue));
+
+                if (hasReverseOpen)
+                    updateFlags.Set(Door.ReverseOpen, Convert.ToBoolean(reverseOpenValue));
+
+                updateFlags.Set(BaseEntity.Flags.Busy, false);
+            }
+
+            return true;
         }
 
         private bool ShouldInvokeOnDeployed(BaseEntity entity)
