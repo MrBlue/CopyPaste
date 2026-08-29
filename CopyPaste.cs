@@ -3640,9 +3640,9 @@ namespace Oxide.Plugins
                     if (!sprinkler.IsValid() || sprinkler.IsDestroyed || !sprinkler.IsOn())
                         return;
 
-                    // Clear the on flag and rerun sprinkler startup so DoSplash is invoked without clearing fuel state
-                    sprinkler.SetFlag(BaseEntity.Flags.On, false);
-                    sprinkler.TurnOn();
+                    // Restart the splash callback, then recalculate the rebuilt fluid circuit.
+                    sprinkler.RefreshSprinklerState();
+                    sprinkler.SendChangedToRoot(forceUpdate: true);
                 });
             }
 
