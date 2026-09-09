@@ -678,6 +678,7 @@ namespace Oxide.Plugins
         {
             var entities = undoData.EntitiesToUndo;
             var player = undoData.Player;
+            int entityIndex = 0;
 
             for (var i = entities.Count - 1; i >= 0; i--)
             {
@@ -692,10 +693,11 @@ namespace Oxide.Plugins
                         continue;
                     }
                     RemoveEntity(baseEntity);
+                    if (++entityIndex % _config.UndoBatchSize == 0 && undoData.TryGetBatchYield(_config.LoopExecution.UndoBatchDelay, out var batchYield))
+                        yield return batchYield;
                 }
             }
 
-            int entityIndex = 0;
             // Take an amount of entities from the entity list (defined in config) and kill them. Will be repeated for every tick until there are no entities left.
             foreach (var p in entities)
             {
