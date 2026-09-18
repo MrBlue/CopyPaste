@@ -1867,6 +1867,19 @@ namespace Oxide.Plugins
                     yield return batchYield;
             }
 
+            if (pasteData.Version <= new VersionNumber(4, 2, 7))
+                SnapLegacyFloorFrameEntities(pasteData);
+
+            foreach (var entity in pasteData.StabilityEntities)
+            {
+                entity.grounded = false;
+                entity.InitializeSupports();
+                entity.UpdateStability();
+            }
+
+            TrySplitPastedBuilding(pasteData);
+            PasteDelayedCupboards(pasteData);
+
             // Adjust IOEntity positions to fix alignment issues for older file versions
             if (pasteData.Version < new VersionNumber(4, 2, 0))
                 pasteData.checkPosition = Pool.Get<List<IOEntity>>();
@@ -1883,16 +1896,6 @@ namespace Oxide.Plugins
             foreach (var keyPair in pasteData.ItemsWithSubEntity)
             {
                 SetItemSubEntity(pasteData, keyPair.Value, keyPair.Key);
-            }
-
-            if (pasteData.Version <= new VersionNumber(4, 2, 7))
-                SnapLegacyFloorFrameEntities(pasteData);
-
-            foreach (var entity in pasteData.StabilityEntities)
-            {
-                entity.grounded = false;
-                entity.InitializeSupports();
-                entity.UpdateStability();
             }
 
             foreach (var adapter in pasteData.industrialStorageAdaptors)
@@ -1914,9 +1917,6 @@ namespace Oxide.Plugins
             }
 
             pasteData.FinalProcessingActions.ForEach(action => action());
-
-            TrySplitPastedBuilding(pasteData);
-            PasteDelayedCupboards(pasteData);
 
             pasteData.Player.Reply(Lang("PASTE_SUCCESS", pasteData.Player.Id) + ": " + pasteData.Filename);
 
