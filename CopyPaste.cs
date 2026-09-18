@@ -1110,11 +1110,12 @@ namespace Oxide.Plugins
                     lightsPointsList.Add(new Dictionary<string, object>
                     {
                         { "normal", pointEntry.normal },
-                        { "point", NormalizePosition(copyData.SourcePos, pointEntry.point, copyData.RotCor) },
+                        { "point", NormalizePosition(copyData.SourcePos, stringLights.transform.TransformPoint(pointEntry.point), copyData.RotCor) },
                         { "slack", pointEntry.slack },
                     });
                 }
                 data.Add("points", lightsPointsList);
+                data.Add("lengthUsed", stringLights.lengthUsed);
             }
 
             var chandelier = entity as Chandelier;
@@ -2986,6 +2987,9 @@ namespace Oxide.Plugins
             {
                 if (data.ContainsKey("points"))
                 {
+                    if (data.TryGetValue("lengthUsed", out var rawLengthUsed))
+                        stringLights.lengthUsed = Convert.ToInt32(rawLengthUsed);
+
                     var points = data["points"] as List<object>;
                     if (points != null && points.Count > 0)
                     {
@@ -3008,7 +3012,7 @@ namespace Oxide.Plugins
                             {
                                 normal = new Vector3(Convert.ToSingle(normal["x"]), Convert.ToSingle(normal["y"]),
                                     Convert.ToSingle(normal["z"])),
-                                point = adjustedPoint,
+                                point = stringLights.transform.InverseTransformPoint(adjustedPoint),
                                 slack = slack
                             });
                         }
