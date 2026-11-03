@@ -1051,19 +1051,19 @@ namespace Oxide.Plugins
             var iSignage = entity as ISignage;
             if (iSignage != null)
             {
-                ExtractTextures(data, iSignage.GetTextureCRCs(), entity, iSignage.FileType);
+                ExtractTextures(data, iSignage.GetTextureCRCs(), entity);
             }
 
             var photoEntity = entity as PhotoEntity;
             if (photoEntity != null)
             {
-                ExtractTextures(data, photoEntity.GetContentCRCs, entity, FileStorage.Type.jpg);
+                ExtractTextures(data, photoEntity.GetContentCRCs, entity);
             }
 
             var baseSculpture = entity as BaseSculpture;
             if (baseSculpture != null && baseSculpture.crc != 0)
             {
-                var sculptureData = FileStorage.server.Get(baseSculpture.crc, FileStorage.Type.sculpt, entity.net.ID);
+                var sculptureData = FileStorage.server.Get(entity.net.ID, 0UL, baseSculpture.crc);
                 if (sculptureData != null && sculptureData.Length != 0)
                     data.Add("sculpture", Convert.ToBase64String(sculptureData));
             }
@@ -1077,13 +1077,13 @@ namespace Oxide.Plugins
             var signContent = entity as SignContent;
             if (signContent != null)
             {
-                ExtractTextures(data, signContent.GetContentCRCs, entity, signContent.FileType);
+                ExtractTextures(data, signContent.GetContentCRCs, entity);
             }
 
             var paintedItemStorageEntity = entity as PaintedItemStorageEntity;
             if (paintedItemStorageEntity != null)
             {
-                ExtractTextures(data, paintedItemStorageEntity.GetContentCRCs, entity, FileStorage.Type.png);
+                ExtractTextures(data, paintedItemStorageEntity.GetContentCRCs, entity);
             }
 
             var shutterFrame = entity as ShutterFrame;
@@ -1327,7 +1327,7 @@ namespace Oxide.Plugins
                 var savedVoicemail = new List<object>();
                 foreach (var voicemail in phoneController.savedVoicemail)
                 {
-                    var oggByte = FileStorage.server.Get(voicemail.audioId, FileStorage.Type.ogg, entity.net.ID);
+                    var oggByte = FileStorage.server.Get(entity.net.ID, voicemail.audioId, voicemail.audioId);
                     if (oggByte != null)
                     {
                         savedVoicemail.Add(new Dictionary<string, object>
@@ -2853,7 +2853,7 @@ namespace Oxide.Plugins
                         if (signData.ContainsKey(textureKey))
                         {
                             var imageBytes = FixSignage(iSignage, Convert.FromBase64String(signData[textureKey].ToString()));
-                            newTextureIDs[num] = FileStorage.server.Store(imageBytes, iSignage.FileType, entity.net.ID);
+                            newTextureIDs[num] = FileStorage.server.Store(entity.net.ID, (uint)num, iSignage.FileType, imageBytes);
                         }
                         else
                         {
@@ -2861,7 +2861,7 @@ namespace Oxide.Plugins
                         }
                     }
 
-                    iSignage.SetTextureCRCs(newTextureIDs);
+                    iSignage.RefreshFileCrcs();
                 }
 
                 if (iSignage is Signage sign)
@@ -2916,7 +2916,7 @@ namespace Oxide.Plugins
                             if (signData.ContainsKey(textureKey))
                             {
                                 var imageBytes = Convert.FromBase64String(signData[textureKey].ToString());
-                                newTextureIDs[num] = FileStorage.server.Store(imageBytes, signContent.FileType, entity.net.ID);
+                                newTextureIDs[num] = FileStorage.server.Store(entity.net.ID, (uint)num, FileStorage.Type.png, imageBytes);
                             }
                             else
                             {
@@ -2924,7 +2924,7 @@ namespace Oxide.Plugins
                             }
                         }
 
-                        signContent.textureIDs = newTextureIDs;
+                        signContent.imageCrc = newTextureIDs.Length > 0 ? newTextureIDs[0] : 0;
                     }
                 }
             }
@@ -2946,7 +2946,7 @@ namespace Oxide.Plugins
                                 var imageBytes = Convert.FromBase64String(signData[$"texture{num}"].ToString());
 
                                 if (ImageProcessing.IsValidPNG(imageBytes, 512, 512))
-                                    paintedItemStorageEntity._currentImageCrc = FileStorage.server.Store(imageBytes, FileStorage.Type.png, paintedItemStorageEntity.net.ID);
+                                    paintedItemStorageEntity._currentImageCrc = FileStorage.server.Store(paintedItemStorageEntity.net.ID, 0UL, FileStorage.Type.png, imageBytes);
                             }
                         }
                     }
@@ -4659,7 +4659,7 @@ namespace Oxide.Plugins
             }
         }
 
-        void ExtractTextures(Dictionary<string, object> data, uint[] textureIDs, BaseEntity entity, FileStorage.Type type)
+        void ExtractTextures(Dictionary<string, object> data, uint[] textureIDs, BaseEntity entity)
         {
             if (textureIDs != null && textureIDs.Length > 0)
             {
@@ -4674,7 +4674,7 @@ namespace Oxide.Plugins
                     if (textureId == 0)
                         continue;
 
-                    var imageByte = FileStorage.server.Get(textureId, type, entity.net.ID);
+                    var imageByte = FileStorage.server.Get(entity.net.ID, (uint)num, textureId);
                     if (imageByte != null)
                     {
                         signData.Add($"texture{num}", Convert.ToBase64String(imageByte));
@@ -4720,7 +4720,7 @@ namespace Oxide.Plugins
                 uint[] contentCRCs = cassette.GetContentCRCs;
                 if (contentCRCs != null && contentCRCs.Length == 1)
                 {
-                    var oggByte = FileStorage.server.Get(contentCRCs[0], FileStorage.Type.ogg, cassette.net.ID);
+                    var oggByte = FileStorage.server.Get(cassette.net.ID, 0UL, contentCRCs[0]);
                     if (oggByte != null)
                     {
                         data.Add("audio", Convert.ToBase64String(oggByte));
@@ -4733,7 +4733,7 @@ namespace Oxide.Plugins
         {
             if (data.ContainsKey("audio"))
             {
-                var contentCRC = FileStorage.server.Store(Convert.FromBase64String(data["audio"].ToString()), FileStorage.Type.ogg, cassette.net.ID);
+                var contentCRC = FileStorage.server.Store(cassette.net.ID, 0UL, FileStorage.Type.ogg, Convert.FromBase64String(data["audio"].ToString()));
                 cassette.SetAudioId(contentCRC, 0);
             }
         }
